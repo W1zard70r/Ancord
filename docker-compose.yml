@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: ancord_db_conteiner
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: ancord_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
