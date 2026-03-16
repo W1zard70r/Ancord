@@ -33,5 +33,11 @@ func main() {
 	fmt.Printf("Chat usecase initialized: %v\n", chatUC)
 
 	ctxCreate, cancelCreate := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelCreate()
 
+	newChat, err := chatUC.CreateChat(ctxCreate, "General")
+	if err != nil {
+		log.Fatalf("Не получилось сделать чат %v", err)
+	}
+	fmt.Printf("Чат создан! ID: %s, Имя: %s\n", newChat.ID.String(), newChat.Name)
 }

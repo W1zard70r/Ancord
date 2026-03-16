@@ -1,0 +1,478 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+internal/
+  domain/
+    chat.go
+    message.go
+    user.go
+  repopsitory/
+    postgres/
+      chat_repo.go
+      message_repo.go
+  usecase/
+    chat_usecase.go
+    message_usecase.go
+migrations/
+  001_init_schema.sql
+.gitignore
+docker-compose.yml
+go.mod
+main.go
+readme.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="internal/repopsitory/postgres/message_repo.go">
+package postgres
+
+import (
+	"context"
+
+	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type messageRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewMessageRepository(pool *pgxpool.Pool) domain.MessageRepository {
+	return &messageRepository{pool: pool}
+}
+
+func (r *messageRepository) Create(ctx context.Context, message *domain.Message) error {
+	query := `INSERT INTO messages (id, chat_id, user_id, content, created_at) VALUES ($1, $2, $3, $4, $5)`
+	_, err := r.pool.Exec(ctx, query, message.ID, message.ChatID, message.UserID, message.Content, message.CreatedAt)
+	return err
+}
+
+func (r *messageRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Message, error) {
+	query := `SELECT (id, chat_id, user_id, content, created_at) FROM messages WHERE id = $1`
+	message := &domain.Message{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(&message.ID, &message.ChatID, &message.UserID, &message.Content, &message.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return message, nil
+}
+
+func (r *messageRepository) GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*domain.Message, error) {
+	query := `SELECT (id, chat_id, user_id, content, created_at) 
+				FROM messages 
+				WHERE chat_id = $1 
+				ORDER BY created_at DESC 
+				LIMIT $2`
+	rows, err := r.pool.Query(ctx, query, chatID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []*domain.Message
+	for rows.Next() {
+		message := &domain.Message{}
+		err := rows.Scan(&message.ID, &message.ChatID, &message.UserID, &message.Content, &message.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, nil
+}
+</file>
+
+<file path="internal/usecase/message_usecase.go">
+package usecase
+
+import "github.com/W1zard70r/Ancord/internal/domain"
+
+type MessageUseCase interface {
+	Create(ctx context.Context, message *domain.Message) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.Message, error)
+	GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*domain.Message, error)
+}
+
+type messageUseCase struct {
+	messageRepo domain.MessageRepository
+}
+
+func NewMessageUseCase(repo domain.MessageRepository) MessageUseCase {
+	return &messageUseCase{
+		messageRepo: repo,
+	}
+}
+
+func (uc *messageUseCase) (ctx context.Context, message *domain.Message) error
+</file>
+
+<file path="internal/domain/chat.go">
+package domain
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Chat struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ChatRepository interface {
+	Create(ctx context.Context, chat *Chat) error
+	GetByID(ctx context.Context, id uuid.UUID) (*Chat, error)
+}
+</file>
+
+<file path="internal/domain/message.go">
+package domain
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Message struct {
+	ID        uuid.UUID `json:"id"`
+	ChatID    uuid.UUID `json:"chat_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type MessageRepository interface {
+	Create(ctx context.Context, message *Message) error
+	GetByID(ctx context.Context, id uuid.UUID) (*Message, error)
+	GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*Message, error)
+}
+</file>
+
+<file path="internal/domain/user.go">
+package domain
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type User struct {
+	ID           uuid.UUID `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type UserRepository interface {
+	Create(ctx context.Context, user *User) error
+	GetByID(ctx context.Context, id uuid.UUID) (*User, error)
+	GetByUsername(ctx context.Context, username string) (*User, error)
+}
+</file>
+
+<file path="internal/repopsitory/postgres/chat_repo.go">
+package postgres
+
+import (
+	"context"
+
+	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type chatRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewChatRepository(pool *pgxpool.Pool) domain.ChatRepository {
+	return &chatRepository{pool: pool}
+}
+
+func (r *chatRepository) Create(ctx context.Context, chat *domain.Chat) error {
+	query := `INSERT INTO chats (id, name, created_at) VALUES ($1, $2, $3)`
+	_, err := r.pool.Exec(ctx, query, chat.ID, chat.Name, chat.CreatedAt)
+	return err
+}
+
+func (r *chatRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Chat, error) {
+	query := `SELECT id, name, created_at FROM chats WHERE id = $1`
+	chat := &domain.Chat{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(&chat.ID, &chat.Name, &chat.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return chat, nil
+}
+</file>
+
+<file path="internal/usecase/chat_usecase.go">
+package usecase
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/google/uuid"
+)
+
+type ChatUseCase interface {
+	CreateChat(ctx context.Context, name string) (*domain.Chat, error)
+	GetChat(ctx context.Context, id uuid.UUID) (*domain.Chat, error)
+}
+
+type chatUseCase struct {
+	chatRepo domain.ChatRepository
+}
+
+func NewChatUseCase(repo domain.ChatRepository) ChatUseCase {
+	return &chatUseCase{
+		chatRepo: repo,
+	}
+}
+
+func (uc *chatUseCase) CreateChat(ctx context.Context, name string) (*domain.Chat, error) {
+	if name == "" {
+		return nil, errors.New("chat name cannot be empty")
+	}
+
+	chat := &domain.Chat{
+		ID:        uuid.Must(uuid.NewV7()),
+		Name:      name,
+		CreatedAt: time.Now(),
+	}
+
+	err := uc.chatRepo.Create(ctx, chat)
+	if err != nil {
+		return nil, err
+	}
+	return chat, nil
+}
+
+func (uc *chatUseCase) GetChat(ctx context.Context, id uuid.UUID) (*domain.Chat, error) {
+	return uc.chatRepo.GetByID(ctx, id)
+}
+</file>
+
+<file path="migrations/001_init_schema.sql">
+-- +goose Up
+CREATE TABLE chats (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY,
+    chat_id UUID NOT NULL REFERENCES chats(id),
+    user_id UUID NOT NULL REFERENCES users(id),
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+-- +goose Down
+DROP TABLE messages;
+DROP TABLE users;
+DROP TABLE chats;
+</file>
+
+<file path=".gitignore">
+
+</file>
+
+<file path="docker-compose.yml">
+services:
+  postgres:
+    image: postgres:15
+    container_name: ancord_db_conteiner
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: ancord_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
+</file>
+
+<file path="go.mod">
+module github.com/W1zard70r/Ancord
+
+go 1.24.0
+
+require (
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.8.0
+)
+
+require (
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
+)
+</file>
+
+<file path="readme.md">
+Разработка вдвоём — это отлично, так как можно разделить проект на две независимые, но взаимосвязанные части. Чтобы вы оба попрактиковались в Go, но при этом не мешали друг другу (не ловили merge-конфликты каждый день), предлагаю разделить зоны ответственности по **доменам**.
+
+В системах связи есть два главных понятия:
+1.  **Signaling (Сигналинг)** — управление комнатами, юзерами, текстовый чат и передача служебных данных (кто кому звонит). Это классический веб/вебсокеты.
+2.  **Media (Медиа)** — сам SFU-сервер, который принимает и раздает пакеты голоса и видео через WebRTC.
+
+---
+
+### Роли в команде
+
+**Разработчик 1 (Назовем его "Мастер Сигналов"):**
+*   **Опыт:** Ему будет проще стартовать, так как это похоже на FastAPI.
+*   **Ответственность:** HTTP API, База Данных, WebSocket-сервер (управление комнатами и пользователями).
+*   **Технологии:** Go (Echo/Fiber), PostgreSQL/SQLite, `gorilla/websocket`.
+
+**Разработчик 2 (Назовем его "Повелитель Медиа"):**
+*   **Опыт:** Будет хардкорно изучать сетевые протоколы, WebRTC и работу с потоками в Go.
+*   **Ответственность:** SFU-сервер для аудио и видео, интеграция TURN-сервера.
+*   **Технологии:** Go (Pion WebRTC), Coturn (Docker), работа с RTP-пакетами.
+
+*Фронтенд (Браузерную часть) можно поделить так: Разработчик 1 делает UI, кнопки и логику вебсокетов, а Разработчик 2 пишет JavaScript-логику для микрофона и экрана (`RTCPeerConnection`).*
+
+---
+
+### Подробный план разработки (Roadmap)
+
+#### Этап 0: База и Инфраструктура (Неделя 1)
+Цель: Подготовить почву, чтобы каждый мог писать свой код.
+*   **Вместе:**
+    *   Создать репозиторий на GitHub.
+    *   Выбрать фреймворк для фронтенда (советую **React + Vite** или просто чистый JS + HTML/Tailwind, чтобы не усложнять).
+*   **Разработчик 1 (Сигналы):**
+    *   Поднять базовый HTTP-сервер на Go (Echo).
+    *   Настроить подключение к БД (можно начать с SQLite, чтобы не мучиться с настройкой базы, для ваших нужд её хватит за глаза).
+    *   Сделать эндпоинты: POST `/room` (создать комнату), GET `/room/:id` (проверить, есть ли комната).
+*   **Разработчик 2 (Медиа):**
+    *   Изучить архитектуру **SFU**.
+    *   Склонировать примеры библиотеки `pion/webrtc` (особенно пример `sfu-ws` или `broadcast`).
+    *   Написать изолированный Go-скрипт, который просто умеет принимать аудио-трек и отдавать его обратно.
+
+#### Этап 1: Текстовый чат и WebSocket-роутер (Неделя 2)
+Цель: Люди могут зайти по ссылке в комнату и видеть друг друга.
+*   **Разработчик 1:**
+    *   Пишет WebSocket-хаб на Go. В Go это делается через `map[string]*websocket.Conn` и горутины (смотри пример чата в доках `gorilla/websocket`).
+    *   Логика: Юзер подключается -> заносится в мапу комнаты -> сервер рассылает всем `{"type": "user_joined", "user": "Vanya"}`.
+    *   На фронте делает простую формочку: ввел ник, нажал "Подключиться", видишь список людей в комнате.
+*   **Разработчик 2:**
+    *   Пишет черновик WebRTC на фронтенде. Функция, которая запрашивает доступ к микрофону (`navigator.mediaDevices.getUserMedia`).
+    *   Пишет логику создания `RTCPeerConnection` в браузере.
+
+#### Этап 2: Интеграция WebRTC (Голос) — Самое важное! (Недели 3-4)
+Цель: Соединить WebSockets и Pion. Голосовой чат работает.
+*   **Как это работает (Вместе):**
+    1. Юзер А заходит в комнату. Фронтенд генерирует *SDP Offer* (описание потока микрофона) и шлет его через WebSocket Разработчика 1.
+    2. WebSocket передает этот Offer в Pion (код Разработчика 2).
+    3. Pion генерирует *SDP Answer* и через WebSocket шлет обратно юзеру А. Связь установлена!
+*   **Разработчик 1:**
+    *   Добавляет в WebSocket обработку новых типов сообщений: `webrtc_offer`, `webrtc_answer`, `ice_candidate`. Перекидывает их в модуль Разработчика 2.
+*   **Разработчик 2:**
+    *   Настраивает `webrtc.NewPeerConnection` в Go для каждого юзера.
+    *   **Магия SFU:** Пишет логику "Трансивера" (TrackLocal/TrackRemote). Когда от юзера А приходит `TrackRemote` (его микрофон), сервер добавляет его как `TrackLocal` (исходящий поток) всем остальным участникам комнаты.
+    *   Выводит аудио на фронтенде в тег `<audio autoplay>`.
+
+#### Этап 3: Демонстрация экрана (Неделя 5)
+Цель: Добавить кнопку "Стрим".
+*   **Разработчик 1:**
+    *   Добавляет в UI фронтенда кнопку "Показать экран" и сетку для видеоплееров (тег `<video>`).
+*   **Разработчик 2:**
+    *   По факту, для Pion нет разницы между звуком и видео. Нужно просто разрешить принимать видео-треки.
+    *   На фронте добавить вызов `navigator.mediaDevices.getDisplayMedia()`.
+    *   Связать пришедший от сервера видео-трек с тегом `<video>` на странице.
+
+#### Этап 4: Продакшен, Деплой и Обход блокировок клубов (Неделя 6)
+Цель: Чтобы это работало из любого компьютерного клуба без лагов.
+*   **Разработчик 1:**
+    *   Пишет `Dockerfile` для Go-бэкенда и `docker-compose.yml`.
+    *   Покупает дешевый VPS (в РФ или Европе, главное, чтобы пинг был норм).
+    *   Настраивает **Caddy server** или **Nginx** (Caddy проще — он сам получает SSL-сертификаты, а HTTPS для микрофона обязателен).
+*   **Разработчик 2:**
+    *   В комп. клубах строгий NAT (NAT Type 3/4). WebRTC не пробьется. Нужен TURN-сервер.
+    *   Добавляет в `docker-compose` образ `coturn/coturn`.
+    *   Настраивает конфиг Coturn (задает логин/пароль) и прописывает эти данные в конфигурацию `RTCPeerConnection` на фронтенде. Теперь, если прямой UDP-трафик заблокирован, голос пойдет через ваш TURN-сервер по TCP/TLS.
+
+---
+
+### Главные подводные камни (Что нужно знать заранее)
+
+1.  **Управление состоянием (State Management) в Go:**
+    В отличие от Python, где GIL, в Go горутины работают реально параллельно. Если два юзера одновременно зайдут в комнату, и вы попытаетесь одновременно записать их в `map` комнаты — сервер упадет с ошибкой `concurrent map writes`.
+    *Решение:* Использовать `sync.RWMutex` (блокировки) при любом изменении списка пользователей комнаты, либо общаться с состоянием комнаты через каналы (`channels`).
+2.  **Эхо-подавление (Echo Cancellation):**
+    В браузере при запросе микрофона обязательно ставьте `echoCancellation: true, noiseSuppression: true`. Иначе вы будете слышать сами себя.
+3.  **Потеря пакетов:**
+    Если играете в CS2, сеть может нагружаться. В Pion нужно будет настроить NACK (запрос потерянных пакетов) или использовать кодек Opus, который хорошо справляется с потерями.
+4.  **Размер комнат:**
+    SFU сервер жрет ресурсы процессора пропорционально количеству людей в одной комнате (N * N-1 соединений). Для 5-10 кентов VPS за 300-500 рублей хватит с головой. Если будет 50 человек — придется оптимизировать.
+
+С чего хотите начать? Могу накидать структуру папок для проекта или дать минимальный код для старта WebSocket-сервера на Echo + горутинах!
+</file>
+
+</files>
