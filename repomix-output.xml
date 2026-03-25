@@ -41,6 +41,9 @@ The content is organized as follows:
 
 <directory_structure>
 internal/
+  delivery/
+    http_handle/
+      handler.go
   domain/
     chat.go
     message.go
@@ -49,103 +52,458 @@ internal/
     postgres/
       chat_repo.go
       message_repo.go
+      user_repo.go
   usecase/
     chat_usecase.go
     message_usecase.go
+    user_usecase.go
 migrations/
-  001_init_schema.sql
+  000001_init_schema.down.sql
+  000001_init_schema.up.sql
 .gitignore
 docker-compose.yml
 go.mod
+LICENSE
 main.go
 readme.md
+README.md
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
 
-<file path="internal/repopsitory/postgres/message_repo.go">
-package postgres
+<file path="internal/delivery/http_handle/handler.go">
+package http_handle
 
 import (
-	"context"
+	"encoding/json"
+	"net/http"
+	"strconv"
 
-	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/W1zard70r/Ancord/internal/usecase"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type messageRepository struct {
-	pool *pgxpool.Pool
+type Handler struct {
+	userUC    usecase.UserUseCase
+	chatUC    usecase.ChatUseCase
+	messageUC usecase.MessageUseCase
 }
 
-func NewMessageRepository(pool *pgxpool.Pool) domain.MessageRepository {
-	return &messageRepository{pool: pool}
+func NewHandler(u usecase.UserUseCase, c usecase.ChatUseCase, m usecase.MessageUseCase) *Handler {
+	return &Handler{
+		userUC:    u,
+		chatUC:    c,
+		messageUC: m,
+	}
 }
 
-func (r *messageRepository) Create(ctx context.Context, message *domain.Message) error {
-	query := `INSERT INTO messages (id, chat_id, user_id, content, created_at) VALUES ($1, $2, $3, $4, $5)`
-	_, err := r.pool.Exec(ctx, query, message.ID, message.ChatID, message.UserID, message.Content, message.CreatedAt)
-	return err
+func (h *Handler) RegisterRoutes() http.Handler {
+	r := chi.NewRouter()
+
+	r.Post("/register", h.RegisterUser)
+	r.Post("/chats", h.CreateChat)
+	r.Post("/message", h.SendMessage)
+
+	return r
 }
 
-func (r *messageRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Message, error) {
-	query := `SELECT (id, chat_id, user_id, content, created_at) FROM messages WHERE id = $1`
-	message := &domain.Message{}
-	err := r.pool.QueryRow(ctx, query, id).Scan(&message.ID, &message.ChatID, &message.UserID, &message.Content, &message.CreatedAt)
+func (h *Handler) GetRoutes() http.Handler {
+	r := chi.NewRouter()
+
+	r.Get("/chat/{chat_id}", h.GetChatByID)
+	r.Get("/message", h.GetMessageByID)
+	r.Get("/messages/{chat_id}", h.GetMessagesByChatID)
+
+	return r
+}
+
+func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.userUC.Register(r.Context(), req.Username, req.Password)
 	if err != nil {
-		return nil, err
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	return message, nil
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }
 
-func (r *messageRepository) GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*domain.Message, error) {
-	query := `SELECT (id, chat_id, user_id, content, created_at) 
-				FROM messages 
-				WHERE chat_id = $1 
-				ORDER BY created_at DESC 
-				LIMIT $2`
-	rows, err := r.pool.Query(ctx, query, chatID, limit)
-	if err != nil {
-		return nil, err
+func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
 	}
-	defer rows.Close()
 
-	var messages []*domain.Message
-	for rows.Next() {
-		message := &domain.Message{}
-		err := rows.Scan(&message.ID, &message.ChatID, &message.UserID, &message.Content, &message.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
-		messages = append(messages, message)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	return messages, nil
+
+	chat, err := h.chatUC.CreateChat(r.Context(), req.Name)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(chat)
+}
+
+func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ChatID  uuid.UUID `json:"chat_id"`
+		UserID  uuid.UUID `json:"user_id"`
+		Content string    `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.messageUC.Send(r.Context(), req.UserID, req.ChatID, req.Content)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+func (h *Handler) GetChatByID(w http.ResponseWriter, r *http.Request) {
+	chatID, err := uuid.Parse(chi.URLParam(r, "chat_id"))
+	if err != nil {
+		http.Error(w, "Invalid UUID", http.StatusBadRequest)
+		return
+	}
+
+	chat, err := h.chatUC.GetChat(r.Context(), chatID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if chat == nil {
+		http.Error(w, "Chat not Found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(chat)
+}
+
+func (h *Handler) GetMessageByID(w http.ResponseWriter, r *http.Request) {
+	messageID, err := uuid.Parse(chi.URLParam(r, "message_id"))
+	if err != nil {
+		http.Error(w, "Invalid UUID", http.StatusBadRequest)
+		return
+	}
+
+	message, err := h.messageUC.GetMessage(r.Context(), messageID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if message == nil {
+		http.Error(w, "Chat not Found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(message)
+}
+
+func (h *Handler) GetMessagesByChatID(w http.ResponseWriter, r *http.Request) {
+	chatID, err := uuid.Parse(chi.URLParam(r, "chatID"))
+	if err != nil {
+		http.Error(w, "Invalid UUID", http.StatusBadRequest)
+		return
+	}
+
+	limitStr := r.URL.Query().Get("limit")
+	limit, _ := strconv.Atoi(limitStr)
+
+	if limit <= 0 {
+		limit = 50
+	}
+	chat, err := h.chatUC.GetChat(r.Context(), chatID)
+	if chat == nil {
+		http.Error(w, "Chat not Found", http.StatusNotFound)
+		return
+	}
+
+	messages, err := h.messageUC.GetMessages(r.Context(), chatID, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(messages)
 }
 </file>
 
-<file path="internal/usecase/message_usecase.go">
-package usecase
+<file path="migrations/000001_init_schema.down.sql">
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS chats;
+</file>
 
-import "github.com/W1zard70r/Ancord/internal/domain"
+<file path="migrations/000001_init_schema.up.sql">
+CREATE TABLE chats (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
 
-type MessageUseCase interface {
-	Create(ctx context.Context, message *domain.Message) error
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Message, error)
-	GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*domain.Message, error)
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY,
+    chat_id UUID NOT NULL REFERENCES chats(id),
+    user_id UUID NOT NULL REFERENCES users(id),
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+</file>
+
+<file path="LICENSE">
+The MIT License (MIT)
+
+Original Work
+Copyright (c) 2016 Matthias Kadenbach
+https://github.com/mattes/migrate
+
+Modified Work
+Copyright (c) 2018 Dale Hui
+https://github.com/golang-migrate/migrate
+
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+</file>
+
+<file path="README.md">
+[![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/golang-migrate/migrate/ci.yaml?branch=master)](https://github.com/golang-migrate/migrate/actions/workflows/ci.yaml?query=branch%3Amaster)
+[![GoDoc](https://pkg.go.dev/badge/github.com/golang-migrate/migrate)](https://pkg.go.dev/github.com/golang-migrate/migrate/v4)
+[![Coverage Status](https://img.shields.io/coveralls/github/golang-migrate/migrate/master.svg)](https://coveralls.io/github/golang-migrate/migrate?branch=master)
+[![packagecloud.io](https://img.shields.io/badge/deb-packagecloud.io-844fec.svg)](https://packagecloud.io/golang-migrate/migrate?filter=debs)
+[![Docker Pulls](https://img.shields.io/docker/pulls/migrate/migrate.svg)](https://hub.docker.com/r/migrate/migrate/)
+![Supported Go Versions](https://img.shields.io/badge/Go-1.22%2C%201.23-lightgrey.svg)
+[![GitHub Release](https://img.shields.io/github/release/golang-migrate/migrate.svg)](https://github.com/golang-migrate/migrate/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/golang-migrate/migrate/v4)](https://goreportcard.com/report/github.com/golang-migrate/migrate/v4)
+
+# migrate
+
+__Database migrations written in Go. Use as [CLI](#cli-usage) or import as [library](#use-in-your-go-project).__
+
+* Migrate reads migrations from [sources](#migration-sources)
+   and applies them in correct order to a [database](#databases).
+* Drivers are "dumb", migrate glues everything together and makes sure the logic is bulletproof.
+   (Keeps the drivers lightweight, too.)
+* Database drivers don't assume things or try to correct user input. When in doubt, fail.
+
+Forked from [mattes/migrate](https://github.com/mattes/migrate)
+
+## Databases
+
+Database drivers run migrations. [Add a new database?](database/driver.go)
+
+* [PostgreSQL](database/postgres)
+* [PGX v4](database/pgx)
+* [PGX v5](database/pgx/v5)
+* [Redshift](database/redshift)
+* [Ql](database/ql)
+* [Cassandra / ScyllaDB](database/cassandra)
+* [SQLite](database/sqlite)
+* [SQLite3](database/sqlite3) ([todo #165](https://github.com/mattes/migrate/issues/165))
+* [SQLCipher](database/sqlcipher)
+* [MySQL / MariaDB](database/mysql)
+* [Neo4j](database/neo4j)
+* [MongoDB](database/mongodb)
+* [CrateDB](database/crate) ([todo #170](https://github.com/mattes/migrate/issues/170))
+* [Shell](database/shell) ([todo #171](https://github.com/mattes/migrate/issues/171))
+* [Google Cloud Spanner](database/spanner)
+* [CockroachDB](database/cockroachdb)
+* [YugabyteDB](database/yugabytedb)
+* [ClickHouse](database/clickhouse)
+* [Firebird](database/firebird)
+* [MS SQL Server](database/sqlserver)
+* [rqlite](database/rqlite)
+
+### Database URLs
+
+Database connection strings are specified via URLs. The URL format is driver dependent but generally has the form: `dbdriver://username:password@host:port/dbname?param1=true&param2=false`
+
+Any [reserved URL characters](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_reserved_characters) need to be escaped. Note, the `%` character also [needs to be escaped](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_the_percent_character)
+
+Explicitly, the following characters need to be escaped:
+`!`, `#`, `$`, `%`, `&`, `'`, `(`, `)`, `*`, `+`, `,`, `/`, `:`, `;`, `=`, `?`, `@`, `[`, `]`
+
+It's easiest to always run the URL parts of your DB connection URL (e.g. username, password, etc) through an URL encoder. See the example Python snippets below:
+
+```bash
+$ python3 -c 'import urllib.parse; print(urllib.parse.quote(input("String to encode: "), ""))'
+String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
+FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
+$ python2 -c 'import urllib; print urllib.quote(raw_input("String to encode: "), "")'
+String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
+FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
+$
+```
+
+## Migration Sources
+
+Source drivers read migrations from local or remote sources. [Add a new source?](source/driver.go)
+
+* [Filesystem](source/file) - read from filesystem
+* [io/fs](source/iofs) - read from a Go [io/fs](https://pkg.go.dev/io/fs#FS)
+* [Go-Bindata](source/go_bindata) - read from embedded binary data ([jteeuwen/go-bindata](https://github.com/jteeuwen/go-bindata))
+* [pkger](source/pkger) - read from embedded binary data ([markbates/pkger](https://github.com/markbates/pkger))
+* [GitHub](source/github) - read from remote GitHub repositories
+* [GitHub Enterprise](source/github_ee) - read from remote GitHub Enterprise repositories
+* [Bitbucket](source/bitbucket) - read from remote Bitbucket repositories
+* [Gitlab](source/gitlab) - read from remote Gitlab repositories
+* [AWS S3](source/aws_s3) - read from Amazon Web Services S3
+* [Google Cloud Storage](source/google_cloud_storage) - read from Google Cloud Platform Storage
+
+## CLI usage
+
+* Simple wrapper around this library.
+* Handles ctrl+c (SIGINT) gracefully.
+* No config search paths, no config files, no magic ENV var injections.
+
+__[CLI Documentation](cmd/migrate)__
+
+### Basic usage
+
+```bash
+$ migrate -source file://path/to/migrations -database postgres://localhost:5432/database up 2
+```
+
+### Docker usage
+
+```bash
+$ docker run -v {{ migration dir }}:/migrations --network host migrate/migrate
+    -path=/migrations/ -database postgres://localhost:5432/database up 2
+```
+
+## Use in your Go project
+
+* API is stable and frozen for this release (v3 & v4).
+* Uses [Go modules](https://golang.org/cmd/go/#hdr-Modules__module_versions__and_more) to manage dependencies.
+* To help prevent database corruptions, it supports graceful stops via `GracefulStop chan bool`.
+* Bring your own logger.
+* Uses `io.Reader` streams internally for low memory overhead.
+* Thread-safe and no goroutine leaks.
+
+__[Go Documentation](https://pkg.go.dev/github.com/golang-migrate/migrate/v4)__
+
+```go
+import (
+    "github.com/golang-migrate/migrate/v4"
+    _ "github.com/golang-migrate/migrate/v4/database/postgres"
+    _ "github.com/golang-migrate/migrate/v4/source/github"
+)
+
+func main() {
+    m, err := migrate.New(
+        "github://mattes:personal-access-token@mattes/migrate_test",
+        "postgres://localhost:5432/database?sslmode=enable")
+    m.Steps(2)
 }
+```
 
-type messageUseCase struct {
-	messageRepo domain.MessageRepository
+Want to use an existing database client?
+
+```go
+import (
+    "database/sql"
+    _ "github.com/lib/pq"
+    "github.com/golang-migrate/migrate/v4"
+    "github.com/golang-migrate/migrate/v4/database/postgres"
+    _ "github.com/golang-migrate/migrate/v4/source/file"
+)
+
+func main() {
+    db, err := sql.Open("postgres", "postgres://localhost:5432/database?sslmode=enable")
+    driver, err := postgres.WithInstance(db, &postgres.Config{})
+    m, err := migrate.NewWithDatabaseInstance(
+        "file:///migrations",
+        "postgres", driver)
+    m.Up() // or m.Steps(2) if you want to explicitly set the number of migrations to run
 }
+```
 
-func NewMessageUseCase(repo domain.MessageRepository) MessageUseCase {
-	return &messageUseCase{
-		messageRepo: repo,
-	}
-}
+## Getting started
 
-func (uc *messageUseCase) (ctx context.Context, message *domain.Message) error
+Go to [getting started](GETTING_STARTED.md)
+
+## Tutorials
+
+* [CockroachDB](database/cockroachdb/TUTORIAL.md)
+* [PostgreSQL](database/postgres/TUTORIAL.md)
+
+(more tutorials to come)
+
+## Migration files
+
+Each migration has an up and down migration. [Why?](FAQ.md#why-two-separate-files-up-and-down-for-a-migration)
+
+```bash
+1481574547_create_users_table.up.sql
+1481574547_create_users_table.down.sql
+```
+
+[Best practices: How to write migrations.](MIGRATIONS.md)
+
+## Coming from another db migration tool?
+
+Check out [migradaptor](https://github.com/musinit/migradaptor/).
+*Note: migradaptor is not affiliated or supported by this project*
+
+## Versions
+
+Version | Supported? | Import | Notes
+--------|------------|--------|------
+**master** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | New features and bug fixes arrive here first |
+**v4** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | Used for stable releases |
+**v3** | :x: | `import "github.com/golang-migrate/migrate"` (with package manager) or `import "gopkg.in/golang-migrate/migrate.v3"` (not recommended) | **DO NOT USE** - No longer supported |
+
+## Development and Contributing
+
+Yes, please! [`Makefile`](Makefile) is your friend,
+read the [development guide](CONTRIBUTING.md).
+
+Also have a look at the [FAQ](FAQ.md).
+
+---
+
+Looking for alternatives? [https://awesome-go.com/#database](https://awesome-go.com/#database).
 </file>
 
 <file path="internal/domain/chat.go">
@@ -167,31 +525,6 @@ type Chat struct {
 type ChatRepository interface {
 	Create(ctx context.Context, chat *Chat) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Chat, error)
-}
-</file>
-
-<file path="internal/domain/message.go">
-package domain
-
-import (
-	"context"
-	"time"
-
-	"github.com/google/uuid"
-)
-
-type Message struct {
-	ID        uuid.UUID `json:"id"`
-	ChatID    uuid.UUID `json:"chat_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-type MessageRepository interface {
-	Create(ctx context.Context, message *Message) error
-	GetByID(ctx context.Context, id uuid.UUID) (*Message, error)
-	GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*Message, error)
 }
 </file>
 
@@ -227,6 +560,7 @@ import (
 
 	"github.com/W1zard70r/Ancord/internal/domain"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -248,10 +582,126 @@ func (r *chatRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Cha
 	query := `SELECT id, name, created_at FROM chats WHERE id = $1`
 	chat := &domain.Chat{}
 	err := r.pool.QueryRow(ctx, query, id).Scan(&chat.ID, &chat.Name, &chat.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil // Возвращаем nil, nil - это значит "не найдено"
+	}
+	if err != nil {
+		return nil, err // Это реальная ошибка БД
+	}
+	return chat, nil
+}
+</file>
+
+<file path="internal/repopsitory/postgres/message_repo.go">
+package postgres
+
+import (
+	"context"
+
+	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type messageRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewMessageRepository(pool *pgxpool.Pool) domain.MessageRepository {
+	return &messageRepository{pool: pool}
+}
+
+func (r *messageRepository) Create(ctx context.Context, message *domain.Message) error {
+	query := `INSERT INTO messages (id, chat_id, user_id, content, created_at) VALUES ($1, $2, $3, $4, $5)`
+	_, err := r.pool.Exec(ctx, query, message.ID, message.ChatID, message.UserID, message.Content, message.CreatedAt)
+	return err
+}
+
+func (r *messageRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Message, error) {
+	query := `SELECT id, chat_id, user_id, content, created_at FROM messages WHERE id = $1`
+	message := &domain.Message{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(&message.ID, &message.ChatID, &message.UserID, &message.Content, &message.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
-	return chat, nil
+	return message, nil
+}
+
+func (r *messageRepository) GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*domain.Message, error) {
+	query := `SELECT id, chat_id, user_id, content, created_at 
+				FROM messages 
+				WHERE chat_id = $1 
+				ORDER BY created_at DESC 
+				LIMIT $2`
+	rows, err := r.pool.Query(ctx, query, chatID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages := make([]*domain.Message, 0)
+	for rows.Next() {
+		message := &domain.Message{}
+		err := rows.Scan(&message.ID, &message.ChatID, &message.UserID, &message.Content, &message.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, nil
+}
+</file>
+
+<file path="internal/repopsitory/postgres/user_repo.go">
+package postgres
+
+import (
+	"context"
+
+	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type userRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewUserRepository(pool *pgxpool.Pool) domain.UserRepository {
+	return &userRepository{pool: pool}
+}
+
+func (r *userRepository) Create(ctx context.Context, user *domain.User) error {
+	query := `INSERT INTO users (id, username, password_hash, created_at) VALUES ($1, $2, $3, $4)`
+	_, err := r.pool.Exec(ctx, query, user.ID, user.Username, user.PasswordHash, user.CreatedAt)
+	return err
+}
+
+func (r *userRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+	query := `SELECT id, username, password_hash, created_at FROM users WHERE id = $1`
+	user := &domain.User{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil // Возвращаем nil, nil - это значит "не найдено"
+	}
+	if err != nil {
+		return nil, err // Это реальная ошибка БД
+	}
+	return user, nil
+}
+
+func (r *userRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
+	query := `SELECT id, username, password_hash, created_at FROM users WHERE username = $1`
+	user := &domain.User{}
+	err := r.pool.QueryRow(ctx, query, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil // Возвращаем nil, nil - это значит "не найдено"
+	}
+	if err != nil {
+		return nil, err // Это реальная ошибка БД
+	}
+	return user, nil
 }
 </file>
 
@@ -305,33 +755,123 @@ func (uc *chatUseCase) GetChat(ctx context.Context, id uuid.UUID) (*domain.Chat,
 }
 </file>
 
-<file path="migrations/001_init_schema.sql">
--- +goose Up
-CREATE TABLE chats (
-    id UUID PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL
-);
+<file path="internal/usecase/message_usecase.go">
+package usecase
 
-CREATE TABLE users (
-    id UUID PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL
-);
+import (
+	"context"
+	"fmt"
+	"time"
 
-CREATE TABLE messages (
-    id UUID PRIMARY KEY,
-    chat_id UUID NOT NULL REFERENCES chats(id),
-    user_id UUID NOT NULL REFERENCES users(id),
-    content TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL
-);
+	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/google/uuid"
+)
 
--- +goose Down
-DROP TABLE messages;
-DROP TABLE users;
-DROP TABLE chats;
+type MessageUseCase interface {
+	Send(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, content string) (*domain.Message, error)
+	GetMessages(ctx context.Context, chatID uuid.UUID, limit int) ([]*domain.Message, error)
+	GetMessage(ctx context.Context, messageID uuid.UUID) (*domain.Message, error)
+}
+
+type messageUseCase struct {
+	messageRepo domain.MessageRepository
+	chatUC      ChatUseCase
+	userUC      UserUseCase
+}
+
+func NewMessageUseCase(repo domain.MessageRepository, chatUC ChatUseCase) MessageUseCase {
+	return &messageUseCase{
+		messageRepo: repo,
+		chatUC:      chatUC,
+	}
+}
+
+func (uc *messageUseCase) Send(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, content string) (*domain.Message, error) {
+	// user, err := uc.userUC.GetByID(ctx, userID) //Проверка на то, есть ли юзер-отправитель
+	// if err != nil {
+	// 	return nil, err
+	// } else if user == nil {
+	// 	return nil, fmt.Errorf("chat with id %s not found", chatID.String())
+	// } // пока этого интерфейса нет
+	// TODO: Сделать проверку, что пользователь в чате
+	chat, err := uc.chatUC.GetChat(ctx, chatID) // проверка на чат
+	if err != nil {
+		return nil, err
+	} else if chat == nil {
+		return nil, fmt.Errorf("chat with id %s not found", chatID.String())
+	}
+	message := &domain.Message{
+		ID:        uuid.Must(uuid.NewV7()),
+		ChatID:    chatID,
+		UserID:    userID,
+		Content:   content,
+		CreatedAt: time.Now(),
+	}
+
+	err = uc.messageRepo.Create(ctx, message)
+	if err != nil {
+		return nil, err
+	}
+	return message, nil
+}
+
+func (uc *messageUseCase) GetMessages(ctx context.Context, chatID uuid.UUID, limit int) ([]*domain.Message, error) {
+	return uc.messageRepo.GetByChatID(ctx, chatID, limit)
+}
+
+func (uc *messageUseCase) GetMessage(ctx context.Context, messageID uuid.UUID) (*domain.Message, error) {
+	return uc.messageRepo.GetByID(ctx, messageID)
+}
+</file>
+
+<file path="internal/usecase/user_usecase.go">
+package usecase
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/W1zard70r/Ancord/internal/domain"
+	"github.com/google/uuid"
+)
+
+type UserUseCase interface {
+	Register(ctx context.Context, username, password string) (*domain.User, error)
+}
+
+type userUseCase struct {
+	userRepo domain.UserRepository
+}
+
+func NewUserUseCase(repo domain.UserRepository) UserUseCase {
+	return &userUseCase{
+		userRepo: repo,
+	}
+}
+
+func (uc *userUseCase) Register(ctx context.Context, username, password string) (*domain.User, error) {
+	// логика проверки можно ли следать такого пользователя
+	user, err := uc.userRepo.GetByUsername(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil {
+		return nil, fmt.Errorf("Пользователь с таким username уже сущетсвует")
+	}
+	user = &domain.User{
+		ID:           uuid.Must(uuid.NewV7()),
+		Username:     username,
+		PasswordHash: password,
+		CreatedAt:    time.Now(),
+	}
+
+	err = uc.userRepo.Create(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
 </file>
 
 <file path=".gitignore">
@@ -348,7 +888,7 @@ services:
       POSTGRES_PASSWORD: secretpassword
       POSTGRES_DB: ancord_db
     ports:
-      - "5433:5432"
+      - "5436:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 volumes:
@@ -366,6 +906,7 @@ require (
 )
 
 require (
+	github.com/go-chi/chi/v5 v5.2.5 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -473,6 +1014,31 @@ require (
     SFU сервер жрет ресурсы процессора пропорционально количеству людей в одной комнате (N * N-1 соединений). Для 5-10 кентов VPS за 300-500 рублей хватит с головой. Если будет 50 человек — придется оптимизировать.
 
 С чего хотите начать? Могу накидать структуру папок для проекта или дать минимальный код для старта WebSocket-сервера на Echo + горутинах!
+</file>
+
+<file path="internal/domain/message.go">
+package domain
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Message struct {
+	ID        uuid.UUID `json:"id"`
+	ChatID    uuid.UUID `json:"chat_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type MessageRepository interface {
+	Create(ctx context.Context, message *Message) error
+	GetByID(ctx context.Context, id uuid.UUID) (*Message, error)
+	GetByChatID(ctx context.Context, chatID uuid.UUID, limit int) ([]*Message, error)
+}
 </file>
 
 </files>

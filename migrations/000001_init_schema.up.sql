@@ -1,4 +1,3 @@
--- +goose Up
 CREATE TABLE chats (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL,
@@ -19,8 +18,3 @@ CREATE TABLE messages (
     content TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
-
--- +goose Down
-DROP TABLE messages;
-DROP TABLE users;
-DROP TABLE chats;

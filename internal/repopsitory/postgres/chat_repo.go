@@ -5,6 +5,7 @@ import (
 
 	"github.com/W1zard70r/Ancord/internal/domain"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,8 +27,11 @@ func (r *chatRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Cha
 	query := `SELECT id, name, created_at FROM chats WHERE id = $1`
 	chat := &domain.Chat{}
 	err := r.pool.QueryRow(ctx, query, id).Scan(&chat.ID, &chat.Name, &chat.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil // Возвращаем nil, nil - это значит "не найдено"
+	}
 	if err != nil {
-		return nil, err
+		return nil, err // Это реальная ошибка БД
 	}
 	return chat, nil
 }

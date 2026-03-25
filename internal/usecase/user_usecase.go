@@ -7,7 +7,6 @@ import (
 
 	"github.com/W1zard70r/Ancord/internal/domain"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 type UserUseCase interface {
@@ -27,7 +26,7 @@ func NewUserUseCase(repo domain.UserRepository) UserUseCase {
 func (uc *userUseCase) Register(ctx context.Context, username, password string) (*domain.User, error) {
 	// логика проверки можно ли следать такого пользователя
 	user, err := uc.userRepo.GetByUsername(ctx, username)
-	if err != nil && err != pgx.ErrNoRows {
+	if err != nil {
 		return nil, err
 	}
 	if user != nil {

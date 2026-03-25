@@ -17,7 +17,7 @@ func NewMessageRepository(pool *pgxpool.Pool) domain.MessageRepository {
 }
 
 func (r *messageRepository) Create(ctx context.Context, message *domain.Message) error {
-	query := `INSERT INTO messages id, chat_id, user_id, content, created_at VALUES ($1, $2, $3, $4, $5)`
+	query := `INSERT INTO messages (id, chat_id, user_id, content, created_at) VALUES ($1, $2, $3, $4, $5)`
 	_, err := r.pool.Exec(ctx, query, message.ID, message.ChatID, message.UserID, message.Content, message.CreatedAt)
 	return err
 }
@@ -44,7 +44,7 @@ func (r *messageRepository) GetByChatID(ctx context.Context, chatID uuid.UUID, l
 	}
 	defer rows.Close()
 
-	var messages []*domain.Message
+	messages := make([]*domain.Message, 0)
 	for rows.Next() {
 		message := &domain.Message{}
 		err := rows.Scan(&message.ID, &message.ChatID, &message.UserID, &message.Content, &message.CreatedAt)

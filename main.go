@@ -1,43 +1,46 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"log"
+	"net/http"
 	"time"
 
+	"context"
+
+	"github.com/W1zard70r/Ancord/internal/config"
+	"github.com/W1zard70r/Ancord/internal/delivery/api"
 	"github.com/W1zard70r/Ancord/internal/repopsitory/postgres"
 	"github.com/W1zard70r/Ancord/internal/usecase"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	connStr := "postgres://postgres:secretpassword@127.0.0.1:5433/ancord_db?sslmode=disable"
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+	cfg := config.Load()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, connStr)
-	if err != nil {
-		log.Fatalf("Не удалось подключиться к БД %v", err)
-	}
-	defer pool.Close()
+	pool, _ := pgxpool.New(ctx, cfg.DBURL)
 
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("БД не отвечает %v", err)
-	}
-	fmt.Println("Успешно подключились к БД")
-
+	userRepo := postgres.NewUserRepository(pool)
 	chatRepo := postgres.NewChatRepository(pool)
+	msgRepo := postgres.NewMessageRepository(pool)
+
+	userUC := usecase.NewUserUseCase(userRepo)
 	chatUC := usecase.NewChatUseCase(chatRepo)
-	fmt.Printf("Chat usecase initialized: %v\n", chatUC)
+	msgUC := usecase.NewMessageUseCase(msgRepo, chatUC)
 
-	ctxCreate, cancelCreate := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancelCreate()
+	h := api.NewHandler(userUC, chatUC, msgUC)
+	r := chi.NewRouter()
 
-	newChat, err := chatUC.CreateChat(ctxCreate, "General")
-	if err != nil {
-		log.Fatalf("Не получилось сделать чат %v", err)
-	}
-	fmt.Printf("Чат создан! ID: %s, Имя: %s\n", newChat.ID.String(), newChat.Name)
+	r.Mount("/api/v1", h.Routes())
+
+	log.Println("Сервер запущен на :8080")
+	http.ListenAndServe(":"+cfg.Port, r)
 }
