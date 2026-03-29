@@ -35,3 +35,42 @@ func (r *chatRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Cha
 	}
 	return chat, nil
 }
+
+func (r *chatRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.Chat, error) {
+	query := `SELECT id, name, created_at 
+				FROM chats 
+				WHERE user_id = $1 
+				ORDER BY created_at DESC`
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	chats := make([]*domain.Chat, 0)
+	for rows.Next() {
+		chat := &domain.Chat{}
+		err := rows.Scan(&chat.ID, &chat.Name, &chat.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		chats = append(chats, chat)
+	}
+	return chats, nil
+}
+
+func (r *chatRepository) IsMember(ctx context.Context, chatID, userID uuid.UUID) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2)`
+	var exists bool
+	err := r.pool.QueryRow(ctx, query, chatID, userID).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (r *chatRepository) AddMember(ctx context.Context, chatID, userID uuid.UUID) error {
+	query := `INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
+	_, err := r.pool.Exec(ctx, query, chatID, userID)
+	return err
+}

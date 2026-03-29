@@ -17,31 +17,28 @@ type MessageUseCase interface {
 
 type messageUseCase struct {
 	messageRepo domain.MessageRepository
+	chatRepo    domain.ChatRepository
 	chatUC      ChatUseCase
-	userUC      UserUseCase
 }
 
-func NewMessageUseCase(repo domain.MessageRepository, chatUC ChatUseCase) MessageUseCase {
+func NewMessageUseCase(messRepo domain.MessageRepository, chatUC ChatUseCase) MessageUseCase {
 	return &messageUseCase{
-		messageRepo: repo,
+		messageRepo: messRepo,
 		chatUC:      chatUC,
 	}
 }
 
 func (uc *messageUseCase) Send(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, content string) (*domain.Message, error) {
-	// user, err := uc.userUC.GetByID(ctx, userID) //Проверка на то, есть ли юзер-отправитель
-	// if err != nil {
-	// 	return nil, err
-	// } else if user == nil {
-	// 	return nil, fmt.Errorf("chat with id %s not found", chatID.String())
-	// } // пока этого интерфейса нет
-	// TODO: Сделать проверку, что пользователь в чате
-	chat, err := uc.chatUC.GetChat(ctx, chatID) // проверка на чат
+
+	//проверка на то, что пользователь в чате
+	isMember, err := uc.chatUC.IsUserMember(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
-	} else if chat == nil {
-		return nil, fmt.Errorf("chat with id %s not found", chatID.String())
 	}
+	if !isMember {
+		return nil, fmt.Errorf("вы не состоите в этом чате")
+	}
+	//создаём соообщение
 	message := &domain.Message{
 		ID:        uuid.Must(uuid.NewV7()),
 		ChatID:    chatID,

@@ -16,4 +16,7 @@ type Chat struct {
 type ChatRepository interface {
 	Create(ctx context.Context, chat *Chat) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Chat, error)
+	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*Chat, error)
+	IsMember(ctx context.Context, chatID, userID uuid.UUID) (bool, error)
+	AddMember(ctx context.Context, chatID, userID uuid.UUID) error
 }

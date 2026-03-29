@@ -14,30 +14,16 @@ type Handler struct {
 	userUC    usecase.UserUseCase
 	chatUC    usecase.ChatUseCase
 	messageUC usecase.MessageUseCase
+	jwtKey    []byte
 }
 
-func NewHandler(u usecase.UserUseCase, c usecase.ChatUseCase, m usecase.MessageUseCase) *Handler {
+func NewHandler(u usecase.UserUseCase, c usecase.ChatUseCase, m usecase.MessageUseCase, secret string) *Handler {
 	return &Handler{
 		userUC:    u,
 		chatUC:    c,
 		messageUC: m,
+		jwtKey:    []byte(secret),
 	}
-}
-
-func (h *Handler) Routes() http.Handler {
-	r := chi.NewRouter()
-
-	// POST (Запись)
-	r.Post("/register", h.RegisterUser)
-	r.Post("/chats", h.CreateChat)
-	r.Post("/message", h.SendMessage)
-
-	// GET (Чтение)
-	r.Get("/chat/{chat_id}", h.GetChatByID)
-	r.Get("/message/{message_id}", h.GetMessageByID)
-	r.Get("/messages/{chat_id}", h.GetMessagesByChatID)
-
-	return r
 }
 
 func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +46,7 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(UserIDKey).(uuid.UUID)
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -69,7 +56,7 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chat, err := h.chatUC.CreateChat(r.Context(), req.Name)
+	chat, err := h.chatUC.CreateChat(r.Context(), userID, req.Name)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -80,9 +67,10 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(UserIDKey).(uuid.UUID)
+
 	var req struct {
 		ChatID  uuid.UUID `json:"chat_id"`
-		UserID  uuid.UUID `json:"user_id"`
 		Content string    `json:"content"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -90,7 +78,7 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.messageUC.Send(r.Context(), req.UserID, req.ChatID, req.Content)
+	user, err := h.messageUC.Send(r.Context(), userID, req.ChatID, req.Content)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -165,4 +153,29 @@ func (h *Handler) GetMessagesByChatID(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(messages)
+}
+
+func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
+	chatID, err := uuid.Parse(chi.URLParam(r, "chat_id"))
+	if err != nil {
+		http.Error(w, "Invalid UUID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		TargetUserID uuid.UUID `json:"target_user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	inviterID := r.Context().Value(UserIDKey).(uuid.UUID)
+
+	err = h.chatUC.AddUserToChat(r.Context(), chatID, inviterID, req.TargetUserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
