@@ -36,7 +36,7 @@ func (r *messageRepository) GetByChatID(ctx context.Context, chatID uuid.UUID, l
 	query := `SELECT id, chat_id, user_id, content, created_at 
 				FROM messages 
 				WHERE chat_id = $1 
-				ORDER BY created_at DESC 
+				ORDER BY created_at ASC 
 				LIMIT $2`
 	rows, err := r.pool.Query(ctx, query, chatID, limit)
 	if err != nil {

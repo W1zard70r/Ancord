@@ -19,14 +19,19 @@ func AuthMiddleware(secret []byte) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// читаем залоговок
 			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				http.Error(w, "Authorization header required", http.StatusUnauthorized)
-				return
-			}
 
 			//убираем Bearer
 			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
+			// Если в заголовке пусто, пробуем Query Param
+			if tokenStr == "" {
+				tokenStr = r.URL.Query().Get("token")
+			}
+
+			if tokenStr == "" {
+				http.Error(w, "Authorization header or token query param required", http.StatusUnauthorized)
+				return
+			}
 			log.Printf("tokenStr token: %s", tokenStr)
 			log.Printf("DEBUG: Middleware secret: '%s'", string(secret))
 

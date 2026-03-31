@@ -13,6 +13,7 @@ import (
 	"github.com/W1zard70r/Ancord/internal/repopsitory/postgres"
 	"github.com/W1zard70r/Ancord/internal/usecase"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
@@ -48,6 +49,12 @@ func main() {
 	go hub.Run()
 	wsHandler := ws.NewWSHandler(hub)
 
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173"}, // Твой фронт
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: true,
+	}))
 	// Публичные
 	r.Post("/register", h.RegisterUser)
 	r.Post("/login", h.Login)

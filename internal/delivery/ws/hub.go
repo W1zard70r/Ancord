@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sync"
 
 	"github.com/W1zard70r/Ancord/internal/usecase"
@@ -18,9 +19,10 @@ type Client struct {
 }
 
 type WSAction struct {
-	Type    string    `json:"type"` // "join", "message"
-	ChatID  uuid.UUID `json:"chat_id"`
-	Content string    `json:"content"`
+	Type    string      `json:"type"`
+	ChatID  uuid.UUID   `json:"chat_id"`
+	Content string      `json:"content,omitempty"` // Для входящего текста от клиента
+	Message interface{} `json:"message,omitempty"` // Для исходящего объекта (из БД)
 }
 
 func (c *Client) writePump() {
@@ -70,15 +72,42 @@ func (c *Client) readPump() {
 			c.Hub.subscriptions[action.ChatID][c.UserID] = true
 			c.Hub.mu.Unlock()
 
+			// получаем и кидаем историю
+			messages, err := c.Hub.msgUC.GetMessages(context.Background(), action.ChatID, 50)
+			if err == nil && len(messages) > 0 {
+				response := map[string]interface{}{
+					"type": "history",
+					"data": messages,
+				}
+				respJSON, _ := json.Marshal(response)
+				c.Send <- respJSON
+
+			}
+
 		case "message":
-			// Сначала проверяем права!
-			isMember, _ := c.Hub.chatUC.IsUserMember(context.Background(), action.ChatID, c.UserID)
-			if !isMember {
-				c.Send <- []byte(`{"type":"error", "message":"not a member"}`)
+			// проверяем подписку
+			c.Hub.mu.RLock() // Используй RLock для чтения (это быстрее и безопаснее)
+			isSubscribed := c.Hub.subscriptions[action.ChatID][c.UserID]
+			c.Hub.mu.RUnlock() // Сразу разблокировали!
+
+			if !isSubscribed {
+				c.Send <- []byte(`{"type":"error", "message":"Join chat before sending messages"}`)
 				continue
 			}
-			// Если ок — кидаем в хаб
-			c.Hub.broadcast <- &action
+
+			// пробудем записать сообщение
+			msg, err := c.Hub.msgUC.Send(context.Background(), c.UserID, action.ChatID, action.Content)
+			if err != nil {
+				c.Send <- []byte(`{"type":"error", "message":"` + err.Error() + `"}`)
+				continue // Просто игнорируем это сообщение
+			}
+
+			// кидаем онлайн пользователям-подписчикам
+			c.Hub.broadcast <- &WSAction{
+				Type:    "message",
+				ChatID:  action.ChatID,
+				Message: msg,
+			}
 		}
 	}
 }
@@ -131,18 +160,28 @@ func (h *Hub) Run() {
 			}
 			h.mu.Unlock()
 		case action := <-h.broadcast:
-
+			// 1. Формируем соощбение для отправки
+			msgJSON, err := json.Marshal(action)
+			if err != nil {
+				log.Printf("Error marshaling message: %v", err)
+				continue
+			}
 			h.mu.RLock()
-			// 1. Берем всех юзеров, кто в этом чате
+			// 2. Берем всех юзеров, кто в этом чате
 			usersInChat := h.subscriptions[action.ChatID]
-
-			// 2. Формируем сообщение для отправки
-			msgJSON, _ := json.Marshal(action)
 
 			// 3. Шлем только тем, кто сейчас онлайн И в этом чате
 			for userID := range usersInChat {
 				if client, ok := h.clients[userID]; ok {
-					client.Send <- msgJSON
+					select {
+					case client.Send <- msgJSON:
+						// Успешно ушло
+					default:
+						// не получилось доставить всё
+						log.Printf("Client %s buffer full, dropping message", userID)
+						// Можно принудительно отключить такого клиента
+						// h.unregister <- client
+					}
 				}
 			}
 			h.mu.RUnlock()

@@ -60,19 +60,19 @@ func (uc *chatUseCase) IsUserMember(ctx context.Context, chatID, userID uuid.UUI
 }
 
 func (uc *chatUseCase) AddUserToChat(ctx context.Context, chatID, inviterID, targetUserID uuid.UUID) error {
-	is_inviter, err := uc.chatRepo.IsMember(ctx, chatID, inviterID)
+	isInviter, err := uc.chatRepo.IsMember(ctx, chatID, inviterID)
 	if err != nil {
 		return err
 	}
-	if !is_inviter {
+	if !isInviter {
 		return errors.New("user have no ability to invite")
 	}
 
-	is_target, err := uc.chatRepo.IsMember(ctx, chatID, targetUserID)
+	isTarget, err := uc.chatRepo.IsMember(ctx, chatID, targetUserID)
 	if err != nil {
 		return err
 	}
-	if is_target {
+	if isTarget {
 		return errors.New("user already in chat")
 	}
 
