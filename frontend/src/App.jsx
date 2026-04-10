@@ -1,132 +1,60 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { useChat } from './hooks/useChat';
 import axios from 'axios';
 
 function App() {
-  const [username, setUsername] = useState('user1');
-  const [password, setPassword] = useState('password123');
-  const [token, setToken] = useState('');
-
-  // Вставь сюда реальный ID чата из своей базы
-  const [chatID, setChatID] = useState('019d3b68-0b24-732d-827e-3b41aa37cf22');
+  const [auth, setAuth] = useState({ user: '', pass: '', token: '' });
+  const [chats, setChats] = useState([]);
+  const [activeChat, setActiveChat] = useState(null);
   const [input, setInput] = useState('');
 
-  const { messages, sendMessage, connect } = useChat(token, chatID);
-  const messagesEndRef = useRef(null);
-
-  // Автоскролл вниз при новых сообщениях
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const { messages, sendMessage } = useChat(auth.token, activeChat?.id);
 
   const handleLogin = async () => {
     try {
-      const res = await axios.post('http://localhost:8080/login', {
-        username,
-        password
-      });
-      setToken(res.data.token);
-    } catch (e) {
-      console.error(e);
-      alert("Логин не удался. Проверь консоль.");
-    }
-  };
+      const res = await axios.post('http://localhost:8080/login', { username: auth.user, password: auth.pass });
+      setAuth(prev => ({ ...prev, token: res.data.token }));
 
-  const handleSend = () => {
-    if (input.trim() === '') return;
-    sendMessage(input);
-    setInput('');
+      // Загружаем список чатов
+      const chatRes = await axios.get('http://localhost:8080/chats/my', {
+        headers: { Authorization: `Bearer ${res.data.token}` }
+      });
+      setChats(chatRes.data || []);
+    } catch (e) { alert("Ошибка авторизации"); }
   };
 
   return (
-    <div className="h-screen bg-gray-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden flex flex-col h-[80vh]">
+    <div className="flex h-screen bg-gray-100">
+      <div className="w-64 bg-gray-900 text-white p-4">
+        <h2 className="font-bold mb-4">Ancord</h2>
+        {chats.map(c => (
+          <button key={c.id} onClick={() => setActiveChat(c)} className="block w-full text-left p-2 hover:bg-gray-700 rounded">
+            {c.name}
+          </button>
+        ))}
+      </div>
 
-        {/* Хедер */}
-        <div className="bg-blue-600 text-white p-4">
-          <h1 className="text-xl font-bold">Ancord Chat</h1>
-          {token && <div className="text-xs opacity-75 mt-1">Logged in</div>}
-        </div>
-
-        {/* Тело (Авторизация ИЛИ Чат) */}
-        <div className="flex-grow flex flex-col p-4 overflow-hidden">
-
-          {!token ? (
-            <div className="flex flex-col justify-center h-full space-y-4 max-w-xs mx-auto w-full">
-              <h2 className="text-lg font-semibold text-center">Login to Chat</h2>
-              <input
-                className="border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="Username"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-              />
-              <input
-                className="border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-              <button onClick={handleLogin} className="bg-blue-600 text-white rounded p-2 font-medium hover:bg-blue-700 transition">
-                Sign In
-              </button>
+      <div className="flex-grow flex flex-col bg-white">
+        {!auth.token ? (
+          <div className="m-auto w-64 space-y-2">
+            <input className="border p-2 w-full" placeholder="User" onChange={e => setAuth({ ...auth, user: e.target.value })} />
+            <input className="border p-2 w-full" type="password" placeholder="Pass" onChange={e => setAuth({ ...auth, pass: e.target.value })} />
+            <button onClick={handleLogin} className="w-full bg-blue-600 text-white p-2">Login</button>
+          </div>
+        ) : activeChat ? (
+          <>
+            <div className="p-4 border-b font-bold">{activeChat.name}</div>
+            <div className="flex-grow overflow-y-auto p-4 space-y-2">
+              {messages.map((m, i) => <div key={i} className="p-2 bg-blue-100 rounded self-start">{m.content}</div>)}
             </div>
-          ) : (
-            <div className="flex flex-col h-full">
-
-              {/* Кнопка коннекта (пока оставим вручную для надежности) */}
-              <button
-                onClick={() => connect()}
-                className="bg-green-500 text-white rounded p-2 mb-4 font-medium hover:bg-green-600 transition flex-shrink-0"
-              >
-                Connect to Room
-              </button>
-
-              {/* Список сообщений */}
-              <div className="flex-grow border rounded bg-gray-50 p-4 overflow-y-auto mb-4 space-y-3">
-                {messages.length === 0 ? (
-                  <div className="text-center text-gray-400 mt-10">No messages yet...</div>
-                ) : (
-                  messages.map((m, i) => (
-                    <div key={m.id || i} className="bg-white p-3 rounded shadow-sm border border-gray-100">
-                      <div className="flex justify-between items-baseline mb-1">
-                        <span className="text-xs font-bold text-blue-600" title={m.user_id}>User ID: {m.user_id.split('-')[0]}...</span>
-                        {m.created_at && (
-                          <span className="text-[10px] text-gray-400">
-                            {new Date(m.created_at).toLocaleTimeString()}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-gray-800 break-words">{m.content}</p>
-                    </div>
-                  ))
-                )}
-                <div ref={messagesEndRef} /> {/* Якорь для автоскролла */}
-              </div>
-
-              {/* Ввод сообщения */}
-              <div className="flex gap-2 flex-shrink-0">
-                <input
-                  className="border rounded p-3 flex-grow focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                  placeholder="Type a message..."
-                />
-                <button
-                  onClick={handleSend}
-                  className="bg-blue-600 text-white rounded px-6 py-2 font-medium hover:bg-blue-700 transition"
-                >
-                  Send
-                </button>
-              </div>
-
+            <div className="p-4 border-t flex gap-2">
+              <input className="border p-2 flex-grow" value={input} onChange={e => setInput(e.target.value)} />
+              <button onClick={() => { sendMessage(input); setInput(''); }} className="bg-blue-600 text-white px-4 py-2 rounded">Send</button>
             </div>
-          )}
-        </div>
+          </>
+        ) : <div className="m-auto text-gray-500">Выберите чат</div>}
       </div>
     </div>
   );
 }
-
 export default App;

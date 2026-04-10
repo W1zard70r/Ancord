@@ -179,3 +179,16 @@ func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 }
+
+func (h *Handler) GetMyChats(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(UserIDKey).(uuid.UUID)
+
+	chats, err := h.chatUC.GetChatByUserID(r.Context(), userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(chats)
+}
