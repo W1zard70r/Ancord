@@ -37,8 +37,10 @@ func (r *chatRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Cha
 }
 
 func (r *chatRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.Chat, error) {
-	query := `SELECT id, name, created_at 
-				FROM chats 
+	query := `SELECT chat_id, name, created_at 
+				FROM chat_members 
+				JOIN chats 
+				ON chat_members.chat_id = chats.id
 				WHERE user_id = $1 
 				ORDER BY created_at DESC`
 	rows, err := r.pool.Query(ctx, query, userID)
@@ -55,6 +57,9 @@ func (r *chatRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]*
 			return nil, err
 		}
 		chats = append(chats, chat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return chats, nil
 }

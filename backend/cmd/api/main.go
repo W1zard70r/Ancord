@@ -21,7 +21,7 @@ import (
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Println("Info: .env file not found, using system environment variables")
 	}
 	cfg := config.Load()
 
@@ -63,10 +63,14 @@ func main() {
 	// Приватные
 	r.Group(func(r chi.Router) {
 		r.Use(api.AuthMiddleware([]byte(cfg.JWTKey)))
+
 		r.Post("/chats", h.CreateChat)
 		r.Post("/chats/{chat_id}/members", h.AddMember)
 		r.Post("/message", h.SendMessage)
+
+		r.Get("/chats/my", h.GetMyChats)
 		r.Get("/chat/{chat_id}", h.GetChatByID)
+
 		r.Get("/messages/{chat_id}", h.GetMessagesByChatID)
 		r.Get("/message/{message_id}", h.GetMessageByID)
 		r.Get("/ws", wsHandler.ServeWS)

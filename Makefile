@@ -1,8 +1,12 @@
-.PHONY: up down restart logs migrate-up migrate-down clean
+.PHONY: up down restart logs clean migrate-up migrate-down
 
-# Поднять всю инфраструктуру (БД, Бэкенд, Фронтенд)
+# Включаем чтение переменных из .env файла
+include .env
+export
+
+# Поднять всю инфраструктуру (с пересборкой образов)
 up:
-	docker compose up -d --build
+	docker compose up -d --build --force-recreate
 
 # Остановить всё
 down:
@@ -15,16 +19,24 @@ restart: down up
 logs:
 	docker compose logs -f backend
 
-# Накатить миграции (запускать после 'make up')
-# ВАЖНО: Убедись, что у друга установлен CLI утилита migrate, 
-# либо он может запустить это локально, так как порт 5436 проброшен наружу
+seed:
+	@chmod +x scripts/seed.sh
+	@./scripts/seed.sh
+
+# Накатить миграции (выполняется на хосте)
+# Используем DB_URL из .env, но заменяем имя хоста 'postgres' на '127.0.0.1', 
+# так как мигратор запускается локально (на твоем ПК), а не внутри сети Docker
 migrate-up:
-	migrate -path migrations/ -database "postgres://postgres:secretpassword@127.0.0.1:5436/ancord_db?sslmode=disable" up
+	migrate -path backend/migrations/ -database "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5436/${POSTGRES_DB}?sslmode=disable" up
 
+# Откатить миграции
 migrate-down:
-	migrate -path migrations/ -database "postgres://postgres:secretpassword@127.0.0.1:5436/ancord_db?sslmode=disable" down -all
+	migrate -path backend/migrations/ -database "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5436/${POSTGRES_DB}?sslmode=disable" down -all
 
-# Опасная зона: удалить контейнеры и базу данных (очистка)
+migrate-force:
+	migrate -path backend/migrations/ -database "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5436/${POSTGRES_DB}?sslmode=disable" force $(V)
+
+# Полная очистка (удаляет БД!)
 clean:
 	docker compose down -v
 	rm -rf pgdata

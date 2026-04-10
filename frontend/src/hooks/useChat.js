@@ -1,69 +1,43 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export const useChat = (token, chatID) => {
     const [messages, setMessages] = useState([]);
-    const ws = useRef(null); // Используем useRef, чтобы не терять сокет при ререндерах
+    const ws = useRef(null);
 
-    const connect = useCallback(() => {
+    useEffect(() => {
         if (!token || !chatID) return;
 
-        // Если сокет уже открыт - закрываем старый
-        if (ws.current) {
-            ws.current.close();
-        }
+        // Закрываем старый сокет при смене чата
+        if (ws.current) ws.current.close();
 
         const socket = new WebSocket(`ws://localhost:8080/ws?token=${token}`);
+        ws.current = socket;
 
         socket.onopen = () => {
-            console.log("WebSocket Connected");
-            // Отправляем join, чтобы сервер подписал нас и прислал историю
+            console.log("WS Connected");
             socket.send(JSON.stringify({ type: "join", chat_id: chatID }));
         };
 
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            console.log("Received from server:", data);
 
             if (data.type === "history") {
-                // История приходит в массиве data.data
                 setMessages(data.data || []);
             } else if (data.type === "message") {
-                // Новое сообщение приходит в объекте data.message (мы поменяли это на бэке!)
-                if (data.message) {
-                    setMessages((prev) => [...prev, data.message]);
-                }
-            } else if (data.type === "error") {
-                console.error("Server Error:", data.message);
-                alert("Ошибка: " + data.message);
+                // Если это сообщение из БД, распарсим его content
+                const msg = typeof data.message === 'string' ? JSON.parse(data.message) : data.message;
+                setMessages((prev) => [...prev, msg]);
             }
         };
 
-        socket.onclose = () => console.log("WebSocket Disconnected");
-        socket.onerror = (error) => console.error("WebSocket Error:", error);
-
-        ws.current = socket;
+        return () => socket.close();
     }, [token, chatID]);
 
-    const sendMessage = useCallback((content) => {
-        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({
-                type: "message",
-                chat_id: chatID,
-                content: content
-            }));
-        } else {
-            console.error("Cannot send message: WebSocket is not open");
+    const sendMessage = (content) => {
+        if (ws.current?.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: "message", chat_id: chatID, content }));
         }
-    }, [chatID]);
+    };
 
-    // Закрываем сокет при размонтировании компонента
-    useEffect(() => {
-        return () => {
-            if (ws.current) {
-                ws.current.close();
-            }
-        };
-    }, []);
-
-    return { messages, sendMessage, connect };
+    return { messages, sendMessage };
 };

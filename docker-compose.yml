@@ -18,7 +18,7 @@ services:
 
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: ancord_backend
     ports:
@@ -27,20 +27,20 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # Важно: внутри Docker бэкенд стучится к базе по имени контейнера "postgres" (порт 5432)
+      # Прокидываем переменные напрямую в контейнер
       DB_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secretpassword}@postgres:5432/${POSTGRES_DB:-ancord_db}?sslmode=disable
       JWT_KEY: ${JWT_KEY:-super_secret_key_123}
       PORT: 8080
 
   frontend:
     build:
-      context: ./frontend
+      context: ./frontend # <--- Указываем папку фронтенда
       dockerfile: Dockerfile
     container_name: ancord_frontend
     ports:
-      - "5173:80" # Фронт будет доступен на localhost:5173
+      - "5173:80"
     depends_on:
       - backend
 
 volumes:
-  pgdata:
+  pgdata: #TODO автокомпозирование
