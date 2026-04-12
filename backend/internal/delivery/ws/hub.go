@@ -3,7 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/W1zard70r/Ancord/internal/usecase"
@@ -43,6 +43,7 @@ func (c *Client) writePump() {
 
 func (c *Client) readPump() {
 	defer func() {
+		slog.Debug("Closing readPump", slog.String("user_id", c.UserID.String()))
 		c.Hub.unregister <- c
 		c.Conn.Close()
 	}()
@@ -152,24 +153,35 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[client.UserID] = client
 			h.mu.Unlock()
+			slog.Info("Client connected", slog.String("user_id", client.UserID.String()))
 		case client := <-h.unregister:
 			h.mu.Lock()
 			if _, ok := h.clients[client.UserID]; ok {
-				delete(h.clients, (client.UserID))
+				delete(h.clients, client.UserID)
 				close(client.Send)
+
+				for chatID, subs := range h.subscriptions {
+					if _, isSubbed := subs[client.UserID]; isSubbed {
+						delete(subs, client.UserID)
+						slog.Info("Client disconnected: user_id; chat_id", slog.String("user_id", client.UserID.String()), slog.String("chat_id", chatID.String()))
+					}
+				}
 			}
 			h.mu.Unlock()
 		case action := <-h.broadcast:
 			// 1. Формируем соощбение для отправки
 			msgJSON, err := json.Marshal(action)
 			if err != nil {
-				log.Printf("Error marshaling message: %v", err)
+				slog.Error("Failed to marshal broadcast message", slog.String("error", err.Error()))
 				continue
 			}
 			h.mu.RLock()
 			// 2. Берем всех юзеров, кто в этом чате
 			usersInChat := h.subscriptions[action.ChatID]
-
+			slog.Debug("Broadcast message",
+				slog.String("chat_id", action.ChatID.String()),
+				slog.Int("target_users_count", len(usersInChat)),
+			)
 			// 3. Шлем только тем, кто сейчас онлайн И в этом чате
 			for userID := range usersInChat {
 				if client, ok := h.clients[userID]; ok {
@@ -178,10 +190,12 @@ func (h *Hub) Run() {
 						// Успешно ушло
 					default:
 						// не получилось доставить всё
-						log.Printf("Client %s buffer full, dropping message", userID)
+						slog.Warn("Client buffer full, dropping message", slog.String("user_id", userID.String()))
 						// Можно принудительно отключить такого клиента
 						// h.unregister <- client
 					}
+				} else {
+					slog.Debug("User in subscriptions but not online", slog.String("user_id", userID.String()))
 				}
 			}
 			h.mu.RUnlock()

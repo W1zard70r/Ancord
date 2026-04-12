@@ -3,9 +3,12 @@ package api
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -61,6 +64,27 @@ func AuthMiddleware(secret []byte) func(http.Handler) http.Handler {
 			//кладём в контекст
 			ctx := context.WithValue(r.Context(), UserIDKey, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func LoggerMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+			next.ServeHTTP(ww, r)
+
+			logger.Info("HTTP Request",
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.Int("status", ww.Status()),
+				slog.Int("bytes", ww.BytesWritten()),
+				slog.Duration("duration", time.Since(start)),
+				slog.String("remote_addr", r.RemoteAddr),
+			)
 		})
 	}
 }

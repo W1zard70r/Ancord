@@ -2,7 +2,9 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"context"
@@ -19,6 +21,11 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	slog.SetDefault(logger)
+
+	logger.Info("Starting server")
+
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("Info: .env file not found, using system environment variables")
@@ -48,9 +55,9 @@ func main() {
 	hub := ws.NewHub(msgUC, chatUC)
 	go hub.Run()
 	wsHandler := ws.NewWSHandler(hub)
-
+	r.Use(api.LoggerMiddleware(logger))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173"}, // Твой фронт
+		AllowedOrigins:   []string{"http://localhost:5173"},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
