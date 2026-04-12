@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Ancord</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 16px; }
+        button { margin: 6px 4px; padding: 8px 12px; }
+        #logs { font-family: monospace; font-size: 12px; white-space: pre-wrap; background: #f7f7f7; border: 1px solid #ccc; padding: 10px; min-height: 200px; max-height: 320px; overflow-y: auto; }
+        #audioContainer audio { display: block; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <h1>Test Ancord</h1>
+    <button id="joinBtn">Join</button>
+    <button id="stopBtn" disabled>Quit</button>
+    <div id="status">Status: waiting</div>
+    <div id="logs"></div>
+    <div id="audioContainer"></div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const logsEl = document.getElementById('logs');
+        const audioContainer = document.getElementById('audioContainer');
+        const joinBtn = document.getElementById('joinBtn');
+        const stopBtn = document.getElementById('stopBtn');
+
+        let pc = null;
+        let ws = null;
+        let localStream = null;
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logsEl.textContent += `[${time}] ${msg}\n`;
+            logsEl.scrollTop = logsEl.scrollHeight;
+            console.log(msg);
+        }
+
+        function setStatus(text) {
+            statusEl.textContent = 'Status: ' + text;
+        }
+
+        joinBtn.addEventListener('click', join);
+        stopBtn.addEventListener('click', stop);
+
+        async function join() {
+            joinBtn.disabled = true;
+            setStatus('creating connection...');
+
+            try {
+                if (!navigator.mediaDevices?.getUserMedia) {
+                    throw new Error('Your browser does not support getUserMedia');
+                }
+
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                log('Microphone access granted');
+
+                // Получаем TURN конфигурацию с сервера
+                const turnResponse = await fetch('http://localhost:8081/turn-config');
+                if (!turnResponse.ok) {
+                    throw new Error('Failed to get TURN config');
+                }
+                const turnConfig = await turnResponse.json();
+                log('TURN config received: ' + JSON.stringify(turnConfig));
+
+                pc = new RTCPeerConnection(turnConfig);
+                pc.onicecandidate = onIceCandidate;
+                pc.ontrack = onRemoteTrack;
+                pc.onconnectionstatechange = () => {
+                    log('PeerConnection: ' + pc.connectionState);
+                    setStatus(pc.connectionState);
+                };
+
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+                ws = new WebSocket('ws://localhost:8081/ws');
+                ws.onopen = onWsOpen;
+                ws.onmessage = onWsMessage;
+                ws.onerror = e => log('WebSocket error: ' + (e.message || 'connection error'));
+                ws.onclose = () => {
+                    log('WebSocket closed');
+                    stop();
+                };
+
+                stopBtn.disabled = false;
+            } catch (err) {
+                log('error: ' + err.message);
+                setStatus('error');
+                joinBtn.disabled = false;
+            }
+        }
+
+        async function onWsOpen() {
+            log('Websocket open');
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            log('Offer created');
+            ws.send(JSON.stringify({ type: 'offer', payload: offer.sdp }));
+        }
+
+        async function onWsMessage(event) {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'answer') {
+                    log('Received answer');
+                    await pc.setRemoteDescription({ type: 'answer', sdp: msg.payload });
+                    setStatus('connected');
+                } else {
+                    log('Unknown message type: ' + msg.type);
+                }
+            } catch (err) {
+                log('Error parsing message: ' + err.message);
+            }
+        }
+
+        function onIceCandidate(event) {
+            if (!event.candidate) {
+                return;
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('Sending ICE candidate');
+                ws.send(JSON.stringify({ type: 'candidate', payload: event.candidate.candidate }));
+            }
+        }
+
+        function onRemoteTrack(event) {
+            log('Received audio stream from another participant');
+            const audio = document.createElement('audio');
+            audio.autoplay = true;
+            audio.controls = true;
+            audio.srcObject = event.streams[0];
+            audioContainer.appendChild(audio);
+        }
+
+        function stop() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            stopBtn.disabled = true;
+            joinBtn.disabled = false;
+            setStatus('stopped');
+        }
+    </script>
+</body>
+</html>
