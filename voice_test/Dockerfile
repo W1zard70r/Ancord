@@ -1,29 +1,15 @@
-# Скачиваем зависимости и собираем бинарник
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
 
-# Копируем go.mod и go.sum
-COPY go.mod go.sum ./
-
-# Скачиваем зависимости
+COPY voice_test/go.mod voice_test/go.sum ./ 
 RUN go mod download
 
-# Копируем весь исходный код
-COPY . .
+COPY voice_test/sfu ./sfu/
 
-# Собираем бинарник из папки sfu
-RUN CGO_ENABLED=0 GOOS=linux go build -o ./bin/sfu ./sfu
+RUN CGO_ENABLED=0 GOOS=linux go build -o /sfu ./sfu
 
-# Запускаем бинарник в минималистичном образе
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates
 WORKDIR /root/
-
-# Копируем бинарник из первого этапа
-COPY --from=builder /app/bin/sfu .
-
-# Порт, на котором слушает приложение
+COPY --from=builder /sfu .
 EXPOSE 8081
-
-# Команда запуска
 CMD ["./sfu"]
