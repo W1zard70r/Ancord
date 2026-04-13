@@ -55,7 +55,6 @@
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 log('Microphone access granted');
 
-                // Получаем TURN конфигурацию с сервера
                 const turnResponse = await fetch('http://localhost:8081/turn-config');
                 if (!turnResponse.ok) {
                     throw new Error('Failed to get TURN config');

@@ -6,7 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/W1zard70r/Ancord/internal/usecase"
+	"ancord-voice/backend/internal/usecase"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )

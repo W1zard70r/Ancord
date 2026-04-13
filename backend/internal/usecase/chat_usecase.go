@@ -5,7 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/W1zard70r/Ancord/internal/domain"
+	"ancord-voice/backend/internal/domain"
+
 	"github.com/google/uuid"
 )
 

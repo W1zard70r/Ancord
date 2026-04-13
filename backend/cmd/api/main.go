@@ -7,11 +7,12 @@ import (
 
 	"context"
 
-	"github.com/W1zard70r/Ancord/internal/config"
-	"github.com/W1zard70r/Ancord/internal/delivery/api"
-	"github.com/W1zard70r/Ancord/internal/delivery/ws"
-	"github.com/W1zard70r/Ancord/internal/repopsitory/postgres"
-	"github.com/W1zard70r/Ancord/internal/usecase"
+	"ancord-voice/backend/internal/config"
+	"ancord-voice/backend/internal/delivery/api"
+	"ancord-voice/backend/internal/delivery/ws"
+	"ancord-voice/backend/internal/repopsitory/postgres"
+	"ancord-voice/backend/internal/usecase"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"

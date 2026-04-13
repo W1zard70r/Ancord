@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/W1zard70r/Ancord/internal/usecase"
+	"ancord-voice/backend/internal/usecase"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )

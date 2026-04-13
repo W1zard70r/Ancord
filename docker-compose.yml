@@ -20,8 +20,8 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./backend/Dockerfile
     container_name: ancord_backend
     ports:
       - "8080:8080"
@@ -50,8 +50,8 @@ services:
 
   voice_test:
     build:
-      context: ./voice_test
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./voice_test/Dockerfile
     container_name: ancord_sfu
     ports:
       - "8081:8080"   # WebSocket сигнализация (изменен порт, чтобы не конфликтовать с backend)

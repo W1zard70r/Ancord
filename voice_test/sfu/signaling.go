@@ -7,13 +7,14 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
+/* TODO: make normal sync and improve signaling logic */
 type SignalMsg struct {
 	Type    string `json:"type"`
 	Payload string `json:"payload"`
 }
 
 func createPeerConnection(api *webrtc.API) (*webrtc.PeerConnection, error) {
-	// TURN сервер
+	// Initialize with TURN server credentials for NAT traversal
 	turnURL, username, password := GetTURNCredentials()
 
 	config := webrtc.Configuration{
@@ -34,7 +35,7 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 
 	pc, err := createPeerConnection(api)
 	if err != nil {
-		log.Printf("Ошибка создания PeerConnection: %v", err)
+		log.Printf("Failed to create PeerConnection: %v", err)
 		return
 	}
 	defer pc.Close()
@@ -42,23 +43,24 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 	room.Join(pc)
 	defer room.Leave(pc)
 
+	// Provide existing tracks in the room to the new participant
 	room.SyncTracks(pc)
 
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		log.Printf("Получен входящий поток: %s", remoteTrack.ID())
+		log.Printf("New incoming track: %s", remoteTrack.ID())
 
+		// Create a local track to broadcast this stream to other participants
 		localTrack, err := webrtc.NewTrackLocalStaticRTP(
 			remoteTrack.Codec().RTPCodecCapability,
 			"audio",
 			remoteTrack.ID(),
 		)
 		if err != nil {
-			log.Printf("Ошибка создания локального трека: %v", err)
+			log.Printf("Failed to create local track: %v", err)
 			return
 		}
 
 		room.AddTrack(localTrack, pc)
-
 		go relayRTP(remoteTrack, localTrack)
 	})
 
@@ -67,23 +69,23 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 	for {
 		var msg SignalMsg
 		if err := conn.ReadJSON(&msg); err != nil {
-			log.Printf("Соединение WebSocket закрыто: %v", err)
+			log.Printf("WebSocket closed: %v", err)
 			return
 		}
 
 		switch msg.Type {
 		case "offer":
 			if err := handleOffer(pc, msg.Payload, conn, &pendingCandidates); err != nil {
-				log.Printf("Ошибка обработки offer: %v", err)
+				log.Printf("Failed to handle offer: %v", err)
 			}
 
 		case "candidate":
 			if err := handleICECandidate(pc, msg.Payload, &pendingCandidates); err != nil {
-				log.Printf("Ошибка обработки candidate: %v", err)
+				log.Printf("Failed to handle ICE candidate: %v", err)
 			}
 
 		default:
-			log.Printf("Неизвестный тип сигнала: %s", msg.Type)
+			log.Printf("Unknown signal type: %s", msg.Type)
 		}
 	}
 }
@@ -93,9 +95,10 @@ func handleOffer(pc *webrtc.PeerConnection, sdp string, conn *websocket.Conn, pe
 		return err
 	}
 
+	// Process any candidates that arrived before the Offer
 	for _, c := range *pending {
 		if err := pc.AddICECandidate(c); err != nil {
-			log.Printf("Ошибка добавления отложенного candidate: %v", err)
+			log.Printf("Failed to add pending ICE candidate: %v", err)
 		}
 	}
 	*pending = nil
@@ -105,6 +108,7 @@ func handleOffer(pc *webrtc.PeerConnection, sdp string, conn *websocket.Conn, pe
 		return err
 	}
 
+	// Wait for ICE gathering to complete before sending the Answer
 	gatherFinished := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(answer); err != nil {
 		return err
@@ -117,6 +121,7 @@ func handleOffer(pc *webrtc.PeerConnection, sdp string, conn *websocket.Conn, pe
 func handleICECandidate(pc *webrtc.PeerConnection, payload string, pending *[]webrtc.ICECandidateInit) error {
 	candidate := webrtc.ICECandidateInit{Candidate: payload}
 
+	// If RemoteDescription isn't set, we must buffer the candidate
 	if pc.RemoteDescription() == nil {
 		*pending = append(*pending, candidate)
 		return nil

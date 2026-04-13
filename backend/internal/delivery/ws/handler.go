@@ -4,7 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/W1zard70r/Ancord/internal/delivery/api"
+	"ancord-voice/backend/internal/delivery/api"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
