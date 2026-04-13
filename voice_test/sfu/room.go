@@ -41,13 +41,14 @@ func (r *Room) AddTrack(newTrack *webrtc.TrackLocalStaticRTP, owner *webrtc.Peer
 
 	r.Tracks = append(r.Tracks, newTrack)
 
+	// Broadcast the new track to all other participants
 	for _, pc := range r.Peers {
 		if pc == owner {
 			continue
 		}
 
 		if _, err := pc.AddTrack(newTrack); err != nil {
-			log.Printf("Ошибка добавления нового трека участнику: %v", err)
+			log.Printf("Failed to add new track to peer: %v", err)
 		}
 	}
 }
@@ -56,9 +57,10 @@ func (r *Room) SyncTracks(pc *webrtc.PeerConnection) {
 	r.RLock()
 	defer r.RUnlock()
 
+	// Push all current room tracks to a newly joined participant
 	for _, existingTrack := range r.Tracks {
 		if _, err := pc.AddTrack(existingTrack); err != nil {
-			log.Printf("Ошибка добавления существующего трека: %v", err)
+			log.Printf("Failed to sync existing track: %v", err)
 		}
 	}
 }
