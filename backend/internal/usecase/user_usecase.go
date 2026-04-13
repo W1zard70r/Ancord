@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"ancord-voice/backend/internal/domain"
+	"backend/internal/domain"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"

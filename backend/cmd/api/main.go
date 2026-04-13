@@ -7,11 +7,11 @@ import (
 
 	"context"
 
-	"ancord-voice/backend/internal/config"
-	"ancord-voice/backend/internal/delivery/api"
-	"ancord-voice/backend/internal/delivery/ws"
-	"ancord-voice/backend/internal/repopsitory/postgres"
-	"ancord-voice/backend/internal/usecase"
+	"backend/internal/config"
+	"backend/internal/delivery/api"
+	"backend/internal/delivery/ws"
+	"backend/internal/repopsitory/postgres"
+	"backend/internal/usecase"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"

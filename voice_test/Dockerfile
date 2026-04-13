@@ -1,16 +1,15 @@
 FROM golang:1.26-alpine AS builder
-
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o ./bin/sfu ./voice_test/sfu
+COPY voice_test/go.mod voice_test/go.sum ./ 
+RUN go mod download
+
+COPY voice_test/sfu ./sfu/
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /sfu ./sfu
 
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates
 WORKDIR /root/
-COPY --from=builder /app/bin/sfu .
-
+COPY --from=builder /sfu .
 EXPOSE 8081
 CMD ["./sfu"]
