@@ -28,6 +28,9 @@
         let pc = null;
         let ws = null;
         let localStream = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 6;
+        let isNegotiating = false;
 
         function log(msg) {
             const time = new Date().toLocaleTimeString();
@@ -52,7 +55,9 @@
                     throw new Error('Your browser does not support getUserMedia');
                 }
 
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                if (!localStream) {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                }
                 log('Microphone access granted');
 
                 const turnResponse = await fetch('http://localhost:8081/turn-config');
@@ -62,12 +67,25 @@
                 const turnConfig = await turnResponse.json();
                 log('TURN config received: ' + JSON.stringify(turnConfig));
 
+
                 pc = new RTCPeerConnection(turnConfig);
                 pc.onicecandidate = onIceCandidate;
                 pc.ontrack = onRemoteTrack;
-                pc.onconnectionstatechange = () => {
+                pc.onconnectionstatechange = async () => {
                     log('PeerConnection: ' + pc.connectionState);
                     setStatus(pc.connectionState);
+                    if (pc.connectionState === 'failed') {
+                        log('Connection failed — attempting ICE restart');
+                        try {
+                            if (ws && ws.readyState === WebSocket.OPEN && pc.signalingState === 'stable') {
+                                const offer = await pc.createOffer({iceRestart: true});
+                                await pc.setLocalDescription(offer);
+                                ws.send(JSON.stringify({ type: 'offer', payload: offer.sdp }));
+                            }
+                        } catch (err) {
+                            log('ICE restart error: ' + err.message);
+                        }
+                    }
                 };
 
                 localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -78,7 +96,8 @@
                 ws.onerror = e => log('WebSocket error: ' + (e.message || 'connection error'));
                 ws.onclose = () => {
                     log('WebSocket closed');
-                    stop();
+                    setStatus('disconnected');
+                    attemptReconnect();
                 };
 
                 stopBtn.disabled = false;
@@ -91,10 +110,16 @@
 
         async function onWsOpen() {
             log('Websocket open');
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            log('Offer created');
-            ws.send(JSON.stringify({ type: 'offer', payload: offer.sdp }));
+            reconnectAttempts = 0;
+            // create initial offer
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                log('Offer created');
+                ws.send(JSON.stringify({ type: 'offer', payload: offer.sdp }));
+            } catch (err) {
+                log('Failed creating offer: ' + err.message);
+            }
         }
 
         async function onWsMessage(event) {
@@ -104,6 +129,28 @@
                     log('Received answer');
                     await pc.setRemoteDescription({ type: 'answer', sdp: msg.payload });
                     setStatus('connected');
+                    isNegotiating = false;
+                } else if (msg.type === 'renegotiate') {
+                    // server requests client to create a new offer
+                    (async () => {
+                        try {
+                            if (!pc || pc.signalingState !== 'stable') {
+                                log('Skipping renegotiate: signalingState=' + (pc ? pc.signalingState : 'no-pc'));
+                                return;
+                            }
+                            if (isNegotiating) {
+                                log('Already negotiating, skip');
+                                return;
+                            }
+                            isNegotiating = true;
+                            const offer = await pc.createOffer();
+                            await pc.setLocalDescription(offer);
+                            ws.send(JSON.stringify({ type: 'offer', payload: offer.sdp }));
+                        } catch (err) {
+                            log('Renegotiate error: ' + err.message);
+                            isNegotiating = false;
+                        }
+                    })();
                 } else {
                     log('Unknown message type: ' + msg.type);
                 }
@@ -132,6 +179,8 @@
         }
 
         function stop() {
+            reconnectAttempts = 0;
+            isNegotiating = false;
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.close();
             }
@@ -146,6 +195,25 @@
             stopBtn.disabled = true;
             joinBtn.disabled = false;
             setStatus('stopped');
+        }
+
+        function attemptReconnect() {
+            if (reconnectAttempts >= maxReconnectAttempts) {
+                log('Max reconnect attempts reached');
+                stop();
+                return;
+            }
+            reconnectAttempts++;
+            const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+            log('Reconnecting in ' + (delay/1000) + 's');
+            setTimeout(() => {
+                // cleanup existing pc before retry
+                if (pc) {
+                    try { pc.close(); } catch (e) {}
+                    pc = null;
+                }
+                join();
+            }, delay);
         }
     </script>
 </body>

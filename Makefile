@@ -6,7 +6,7 @@ export
 
 # Spin up infrastructure with build and recreate
 up:
-	docker compose up -d --build --force-recreate
+	docker compose up -d --build
 
 # Stop all services
 down:

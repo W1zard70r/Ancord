@@ -1,20 +1,48 @@
+version: '3.8'
+
 services:
   postgres:
     image: postgres:15
-    container_name: ancord_db_conteiner
+    container_name: ancord_db_container
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-ancord_db}
     ports:
       - "5436:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-ancord_db}" ]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - ancord-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: ancord_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - ancord-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: ancord_kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
     networks:
       - ancord-network
 
@@ -23,22 +51,24 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: ancord_backend
-    ports:
-      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      kafka:
+        condition: service_started
     environment:
-      # Прокидываем переменные напрямую в контейнер
       DB_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secretpassword}@postgres:5432/${POSTGRES_DB:-ancord_db}?sslmode=disable
       JWT_KEY: ${JWT_KEY:-super_secret_key_123}
       PORT: 8080
+      KAFKA_BROKER: kafka:9092
+    ports:
+      - "8080:8080"
     networks:
       - ancord-network
 
   frontend:
     build:
-      context: ./frontend # <--- Указываем папку фронтенда
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: ancord_frontend
     ports:
@@ -47,19 +77,20 @@ services:
       - backend
     networks:
       - ancord-network
+
   voice_test:
     build:
       context: ./voice_test
       dockerfile: Dockerfile
     container_name: ancord_sfu
-    ports:
-      - "8081:8080" # WebSocket сигнализация (изменен порт, чтобы не конфликтовать с backend)
-      - "3478:3478/udp" # TURN сервер
     env_file:
       - .env
-    restart: unless-stopped
     environment:
       - PORT=8080
+    ports:
+      - "8081:8080"
+      - "3478:3478/udp"
+    restart: unless-stopped
     depends_on:
       - backend
     networks:
@@ -67,7 +98,7 @@ services:
 
 volumes:
   pgdata:
-    #TODO автокомпозирование
+
 
 networks:
   ancord-network:

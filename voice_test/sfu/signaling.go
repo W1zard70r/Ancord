@@ -40,11 +40,13 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 	}
 	defer pc.Close()
 
-	room.Join(pc)
-	defer room.Leave(pc)
+	// wrap PeerConnection with its signaling connection
+	peer := &Peer{PC: pc, Conn: conn}
+	room.Join(peer)
+	defer room.Leave(peer)
 
 	// Provide existing tracks in the room to the new participant
-	room.SyncTracks(pc)
+	room.SyncTracks(peer)
 
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		log.Printf("New incoming track: %s", remoteTrack.ID())
@@ -60,8 +62,13 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 			return
 		}
 
-		room.AddTrack(localTrack, pc)
-		go relayRTP(remoteTrack, localTrack)
+		room.AddTrack(localTrack, peer)
+
+		// Relay RTP until remote track stops, then remove the local track
+		go func() {
+			relayRTP(remoteTrack, localTrack)
+			room.RemoveTrack(localTrack)
+		}()
 	})
 
 	var pendingCandidates []webrtc.ICECandidateInit
@@ -75,12 +82,12 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 
 		switch msg.Type {
 		case "offer":
-			if err := handleOffer(pc, msg.Payload, conn, &pendingCandidates); err != nil {
+			if err := handleOffer(peer, msg.Payload, &pendingCandidates); err != nil {
 				log.Printf("Failed to handle offer: %v", err)
 			}
 
 		case "candidate":
-			if err := handleICECandidate(pc, msg.Payload, &pendingCandidates); err != nil {
+			if err := handleICECandidate(peer, msg.Payload, &pendingCandidates); err != nil {
 				log.Printf("Failed to handle ICE candidate: %v", err)
 			}
 
@@ -90,7 +97,8 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 	}
 }
 
-func handleOffer(pc *webrtc.PeerConnection, sdp string, conn *websocket.Conn, pending *[]webrtc.ICECandidateInit) error {
+func handleOffer(p *Peer, sdp string, pending *[]webrtc.ICECandidateInit) error {
+	pc := p.PC
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sdp}); err != nil {
 		return err
 	}
@@ -115,19 +123,21 @@ func handleOffer(pc *webrtc.PeerConnection, sdp string, conn *websocket.Conn, pe
 	}
 	<-gatherFinished
 
-	return conn.WriteJSON(SignalMsg{Type: "answer", Payload: pc.LocalDescription().SDP})
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.Conn.WriteJSON(SignalMsg{Type: "answer", Payload: pc.LocalDescription().SDP})
 }
 
-func handleICECandidate(pc *webrtc.PeerConnection, payload string, pending *[]webrtc.ICECandidateInit) error {
+func handleICECandidate(p *Peer, payload string, pending *[]webrtc.ICECandidateInit) error {
 	candidate := webrtc.ICECandidateInit{Candidate: payload}
 
 	// If RemoteDescription isn't set, we must buffer the candidate
-	if pc.RemoteDescription() == nil {
+	if p.PC.RemoteDescription() == nil {
 		*pending = append(*pending, candidate)
 		return nil
 	}
 
-	return pc.AddICECandidate(candidate)
+	return p.PC.AddICECandidate(candidate)
 }
 
 func relayRTP(remoteTrack *webrtc.TrackRemote, localTrack *webrtc.TrackLocalStaticRTP) {
