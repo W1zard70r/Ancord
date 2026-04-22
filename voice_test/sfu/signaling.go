@@ -30,7 +30,7 @@ func createPeerConnection(api *webrtc.API) (*webrtc.PeerConnection, error) {
 	return api.NewPeerConnection(config)
 }
 
-func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
+func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room, userID string, chatID string) {
 	defer conn.Close()
 
 	pc, err := createPeerConnection(api)
@@ -43,7 +43,13 @@ func handleSignaling(conn *websocket.Conn, api *webrtc.API, room *Room) {
 	// wrap PeerConnection with its signaling connection
 	peer := &Peer{PC: pc, Conn: conn}
 	room.Join(peer)
-	defer room.Leave(peer)
+	log.Println("HANDLESIGNALING: User joined room")
+	PublishVoiceEvent(userID, chatID, "join")
+
+	defer func() {
+		room.Leave(peer)
+		PublishVoiceEvent(userID, chatID, "leave")
+	}()
 
 	// Provide existing tracks in the room to the new participant
 	room.SyncTracks(peer)

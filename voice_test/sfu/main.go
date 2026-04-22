@@ -16,7 +16,7 @@ var upgrader = websocket.Upgrader{
 
 func main() {
 	port := os.Getenv("PORT")
-
+	InitKafka()
 	turnServer, err := NewTURNServer()
 	if err != nil {
 		log.Fatalf("Failed to start TURN server: %v", err)
@@ -32,8 +32,17 @@ func main() {
 			log.Printf("WebSocket upgrade error: %v", err)
 			return
 		}
-
-		handleSignaling(conn, api, room)
+		// заглушкаы
+		userID := r.URL.Query().Get("user_id")
+		chatID := r.URL.Query().Get("chat_id")
+		if userID == "" {
+			userID = "unknown_user"
+		}
+		if chatID == "" {
+			chatID = "global_voice"
+		}
+		log.Println("WS ATTEMPT: UserID =", userID, "ChatID =", chatID)
+		handleSignaling(conn, api, room, userID, chatID)
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

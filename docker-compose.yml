@@ -26,6 +26,11 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "2181" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - ancord-network
 
@@ -33,7 +38,8 @@ services:
     image: confluentinc/cp-kafka:7.4.0
     container_name: ancord_kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
@@ -48,9 +54,11 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: ancord_backend
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +95,7 @@ services:
       - .env
     environment:
       - PORT=8080
+      - KAFKA_BROKER=kafka:9092
     ports:
       - "8081:8080"
       - "3478:3478/udp"

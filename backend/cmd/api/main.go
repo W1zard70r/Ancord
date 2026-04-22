@@ -2,15 +2,14 @@ package main
 
 import (
 	"log"
-	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"context"
 
 	"backend/internal/config"
 	"backend/internal/delivery/api"
+	"backend/internal/delivery/kafka"
 	"backend/internal/delivery/ws"
 	"backend/internal/repopsitory/postgres"
 	"backend/internal/usecase"
@@ -22,14 +21,9 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	slog.SetDefault(logger)
-
-	logger.Info("Starting server")
-
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Println("Info: .env file not found, using system environment variables")
 	}
 	cfg := config.Load()
 
@@ -55,8 +49,11 @@ func main() {
 	// запуск websocket hub
 	hub := ws.NewHub(msgUC, chatUC)
 	go hub.Run()
+
+	kafka.StartVoiceEventConsumer(hub)
+
 	wsHandler := ws.NewWSHandler(hub)
-	r.Use(api.LoggerMiddleware(logger))
+
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173"},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
@@ -71,10 +68,14 @@ func main() {
 	// Приватные
 	r.Group(func(r chi.Router) {
 		r.Use(api.AuthMiddleware([]byte(cfg.JWTKey)))
+
 		r.Post("/chats", h.CreateChat)
 		r.Post("/chats/{chat_id}/members", h.AddMember)
 		r.Post("/message", h.SendMessage)
+
+		r.Get("/chats/my", h.GetMyChats)
 		r.Get("/chat/{chat_id}", h.GetChatByID)
+
 		r.Get("/messages/{chat_id}", h.GetMessagesByChatID)
 		r.Get("/message/{message_id}", h.GetMessageByID)
 		r.Get("/ws", wsHandler.ServeWS)

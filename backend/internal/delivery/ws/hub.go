@@ -211,3 +211,20 @@ func (h *Hub) SendToUser(userID uuid.UUID, message []byte) {
 		client.Send <- message
 	}
 }
+
+func (h *Hub) BroadcastToChat(chatID uuid.UUID, message []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	usersInChat := h.subscriptions[chatID]
+	for userID := range usersInChat {
+		Client, ok := h.clients[userID]
+		if ok {
+			select {
+			case Client.Send <- message:
+			default:
+				slog.Warn("Client buffer full, dropping message", slog.String("user_id", userID.String()))
+			}
+		}
+	}
+}

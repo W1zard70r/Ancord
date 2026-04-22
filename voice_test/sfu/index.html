@@ -1,15 +1,39 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <title>Test Ancord</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 16px; }
-        button { margin: 6px 4px; padding: 8px 12px; }
-        #logs { font-family: monospace; font-size: 12px; white-space: pre-wrap; background: #f7f7f7; border: 1px solid #ccc; padding: 10px; min-height: 200px; max-height: 320px; overflow-y: auto; }
-        #audioContainer audio { display: block; margin-top: 8px; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 16px;
+        }
+
+        button {
+            margin: 6px 4px;
+            padding: 8px 12px;
+        }
+
+        #logs {
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            background: #f7f7f7;
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 200px;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
+        #audioContainer audio {
+            display: block;
+            margin-top: 8px;
+        }
     </style>
 </head>
+
 <body>
     <h1>Test Ancord</h1>
     <button id="joinBtn">Join</button>
@@ -78,7 +102,7 @@
                         log('Connection failed — attempting ICE restart');
                         try {
                             if (ws && ws.readyState === WebSocket.OPEN && pc.signalingState === 'stable') {
-                                const offer = await pc.createOffer({iceRestart: true});
+                                const offer = await pc.createOffer({ iceRestart: true });
                                 await pc.setLocalDescription(offer);
                                 ws.send(JSON.stringify({ type: 'offer', payload: offer.sdp }));
                             }
@@ -89,8 +113,10 @@
                 };
 
                 localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                const userId = "019db5da-6d13-7eac-ac2e-7778367693a3";
+                const chatId = "019db5da-6e0c-776d-bfb6-bff08d7a1cf9";
 
-                ws = new WebSocket('ws://localhost:8081/ws');
+                ws = new WebSocket(`ws://127.0.0.1:8081/ws?user_id=${userId}&chat_id=${chatId}`);
                 ws.onopen = onWsOpen;
                 ws.onmessage = onWsMessage;
                 ws.onerror = e => log('WebSocket error: ' + (e.message || 'connection error'));
@@ -205,11 +231,11 @@
             }
             reconnectAttempts++;
             const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
-            log('Reconnecting in ' + (delay/1000) + 's');
+            log('Reconnecting in ' + (delay / 1000) + 's');
             setTimeout(() => {
                 // cleanup existing pc before retry
                 if (pc) {
-                    try { pc.close(); } catch (e) {}
+                    try { pc.close(); } catch (e) { }
                     pc = null;
                 }
                 join();
@@ -217,4 +243,5 @@
         }
     </script>
 </body>
+
 </html>

@@ -6,7 +6,7 @@ export
 
 # Spin up infrastructure with build and recreate
 up:
-	docker compose up -d --build
+	docker compose up -d --build --force-recreate
 
 # Stop all services
 down:
@@ -23,7 +23,7 @@ logs:
 seed:
 	@chmod +x scripts/seed.sh
 	@/bin/bash scripts/seed.sh
-
+	
 # Apply migrations (using 127.0.0.1 for host machine access)
 migrate-up:
 	migrate -path backend/migrations/ -database "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5436/${POSTGRES_DB}?sslmode=disable" up
