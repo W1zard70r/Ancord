@@ -18,7 +18,7 @@ type VoiceEvent struct {
 }
 
 func StartVoiceEventConsumer(hub *ws.Hub) {
-	broker := os.Getenv("KAFKA_BROKER")
+	broker := os.Getenv("KAFKA_BROKER") // переделать в config.KAFKA_BROKER
 
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  []string{broker},

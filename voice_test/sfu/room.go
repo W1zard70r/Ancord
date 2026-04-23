@@ -22,6 +22,17 @@ type RoomTrack struct {
 	Senders map[*Peer]*webrtc.RTPSender
 }
 
+type RoomManager struct {
+	mu    sync.RWMutex
+	rooms map[string]*Room
+}
+
+func NewRoomManager() *RoomManager {
+	return &RoomManager{
+		rooms: make(map[string]*Room),
+	}
+}
+
 type Room struct {
 	sync.RWMutex
 	Peers  []*Peer
@@ -154,4 +165,34 @@ func (r *Room) RemoveTrack(track *webrtc.TrackLocalStaticRTP) {
 		remaining = append(remaining, rt)
 	}
 	r.Tracks = remaining
+}
+
+func (rm *RoomManager) GetOrCreateRoom(chatID string) *Room {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	room, exists := rm.rooms[chatID]
+	if !exists {
+		room := NewRoom()
+		rm.rooms[chatID] = room
+		log.Println("RoomManager: Created new room for chatID: %s", chatID)
+	}
+	return room
+}
+
+func (rm *RoomManager) RemoveRoomIfEmpty(chatID string) {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	room, exists := rm.rooms[chatID]
+	if exists {
+		room.RLock()
+		isEmpty := len(room.Peers) == 0
+		room.RUnlock()
+
+		if isEmpty {
+			delete(rm.rooms, chatID)
+			log.Println("RoomManager: Removed empty room for chatID: %s", chatID)
+		}
+	}
 }

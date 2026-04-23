@@ -23,7 +23,7 @@ func main() {
 	}
 	defer turnServer.Close()
 
-	room := NewRoom()
+	rm := NewRoomManager()
 	api := newWebRTCAPI()
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +32,7 @@ func main() {
 			log.Printf("WebSocket upgrade error: %v", err)
 			return
 		}
-		// заглушкаы
+		// TODO: доставать user_id из JWT токена
 		userID := r.URL.Query().Get("user_id")
 		chatID := r.URL.Query().Get("chat_id")
 		if userID == "" {
@@ -41,8 +41,10 @@ func main() {
 		if chatID == "" {
 			chatID = "global_voice"
 		}
+		room := rm.GetOrCreateRoom(chatID)
+
 		log.Println("WS ATTEMPT: UserID =", userID, "ChatID =", chatID)
-		handleSignaling(conn, api, room, userID, chatID)
+		handleSignaling(conn, api, room, userID, chatID, rm)
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

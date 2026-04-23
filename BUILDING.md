@@ -20,3 +20,10 @@ sudo make migrate-down
 ```bash
 sudo make down
 ```
+
+# Команды для сноса старого сервера
+```bash
+sudo lsof -i :8081 //проверка порта 8081, там будет <PID>
+sudo kill -9 <PID> // Убить все процессы на 8081
+sudo kill -9 <PID> //
+```
